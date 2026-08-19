@@ -1,6 +1,6 @@
 import type { CmDeskLine } from './cmDeskQuote'
 
-/** PDF/寃ъ쟻????鍮꾩뼱 ?덈뒗 Other 以꾩? ?쒖쇅 (Excel 鍮?Other? ?숈씪) */
+/** PDF/견적서에서 비어 있는 Other 줄은 제외 (Excel 빈 Other와 동일) */
 export function isLineVisibleOnPdf(
   line: CmDeskLine,
   exceptionDraft: Record<string, string> = {},
@@ -8,7 +8,7 @@ export function isLineVisibleOnPdf(
   const draft = exceptionDraft[line.id]?.trim() ?? ''
 
   // Excel rule (as per user request):
-  // - Other slots are hidden on PDF unless the user actually filled the ?덉쇅 (J column).
+  // - Other slots are hidden on PDF unless the user actually filled the 예외 (J column).
   //   (Even if Master reference exists and ref/amount are > 0, keep it hidden.)
   if (line.isOtherSlot) {
     if (draft === '') return false

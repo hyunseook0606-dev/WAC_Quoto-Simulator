@@ -73,13 +73,13 @@ export function CmDeskQuotePanel({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="mb-1 text-[11px] font-bold tracking-wider text-wac-orange uppercase">
-              Excel ??? ??TOTAL APPX.
+              Excel 입력 시트 TOTAL APPX.
             </p>
             <p className="font-display text-3xl font-black text-wac-navy">
               {cur} {quote.total.toFixed(2)}
             </p>
             <p className="mt-1 text-sm font-semibold text-slate-600">
-              {quote.route} ? {quote.breakLabel} ? C.W. {quote.cw.toFixed(2)} kg
+              {quote.route} · {quote.breakLabel} · C.W. {quote.cw.toFixed(2)} kg
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -111,10 +111,10 @@ export function CmDeskQuotePanel({
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50 px-4 py-3">
           <div>
             <p className="text-[11px] font-bold tracking-wider text-wac-navy uppercase">
-              Charges ???? / ??? (Excel ???)
+              Charges 참고 / 예외 (Excel 입력)
             </p>
             <p className="mt-1 text-[11px] text-slate-500">
-              Other 1??2 + ??? ?? PDF??? ?? ??? Other????.
+              Other 1–12 + 추가 줄. PDF에는 예외가 있는 Other만 표시됩니다.
             </p>
           </div>
           <button
@@ -123,7 +123,7 @@ export function CmDeskQuotePanel({
             className="inline-flex items-center gap-1 rounded-lg border border-wac-orange bg-white px-2.5 py-1.5 text-[10px] font-bold text-wac-orange uppercase hover:bg-orange-50"
           >
             <Plus className="h-3.5 w-3.5" />
-            Other ???
+            Other 추가
           </button>
         </div>
         <div className="overflow-x-auto">
@@ -132,8 +132,8 @@ export function CmDeskQuotePanel({
               <tr className="border-b border-slate-100 bg-white text-[10px] font-bold tracking-wider text-slate-400 uppercase">
                 <th className="px-3 py-2.5">Charge</th>
                 <th className="px-3 py-2.5">Unit</th>
-                <th className="px-3 py-2.5 text-right">??</th>
-                <th className="px-3 py-2.5 text-right">???</th>
+                <th className="px-3 py-2.5 text-right">참고</th>
+                <th className="px-3 py-2.5 text-right">예외</th>
                 <th className="px-3 py-2.5 text-right">Applied</th>
                 <th className="w-10 px-2 py-2.5" />
               </tr>
@@ -171,7 +171,7 @@ export function CmDeskQuotePanel({
                       )}
                       {l.isOtherSlot && !onPdf && (
                         <span className="mt-0.5 block text-[9px] text-slate-400">
-                          PDF ??? (?? ???)
+                          PDF 숨김 (빈 예외)
                         </span>
                       )}
                     </td>
@@ -203,7 +203,7 @@ export function CmDeskQuotePanel({
                         type="number"
                         min={0}
                         step={0.01}
-                        placeholder="?"
+                        placeholder="예외"
                         value={exceptionDraft[l.id] ?? ''}
                         onChange={(e) => onExceptionChange(l.id, e.target.value)}
                         className="h-9 w-28 rounded border border-yellow-200 bg-yellow-50 px-2 text-right text-[12px] font-medium outline-none focus:border-wac-orange"

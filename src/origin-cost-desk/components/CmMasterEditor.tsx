@@ -334,8 +334,8 @@ export function CmMasterEditor({ master, onChange }: Props) {
       </div>
 
       <p className="text-[10px] leading-relaxed text-slate-500">
-        Excel Master_DB ?몃?移멸낵 ?숈씪 ???ш린???섏젙?섎㈃ Desk 寃ъ쟻쨌李멸퀬(Master)??利됱떆
-        諛섏쁺?⑸땲?? Import xlsx濡???뼱???섎룄 ?덉뒿?덈떎.
+        Excel Master_DB 노란칸과 동일하게 여기서 수정하면 Desk 견적·참고(Master)에 즉시
+        반영됩니다. Import xlsx로 다시 불러도 됩니다.
       </p>
     </div>
   )

@@ -1,109 +1,45 @@
-# WAC Logistics — Digital Freight Desk
+# WAC Origin Cost Desk (Internal Excel-style Quote)
 
-Portfolio MVP: corporate logistics site + **air Instant Quote** (Public) + internal **Origin Cost Desk**.
+This repository contains the **internal** “Origin Cost Desk” web app:
 
-**Live:** [https://wac-logistics.vercel.app](https://wac-logistics.vercel.app)  
-**Repo:** [hyunseook0606-dev/WAC-Logistics](https://github.com/hyunseook0606-dev/WAC-Logistics)
+- Route: `http://localhost:5174/origin-cost-desk`
+- Excel-style workflow: edit `Master_DB` → enter cargo → generate quotation + copyable table + save PDF
 
----
+Public quote / marketing site code was intentionally removed from this repo to keep onboarding simple.
 
-## Problem
-
-Freight desks still quote many lanes with **Excel + email**. Even with air-rate tools, **Hong Kong origin local / trucking fees** (cartage, tunnel, parking) change per job and do not sit cleanly on a monthly master — so staff re-enter and re-match the same shipment data.
-
-## What this MVP proves
-
-1. **Split the workflow** — shippers see indicative air only; desk owns formal origin cost.  
-2. **Split the cost model** — monthly Excel-style master auto-calcs; job-variable fees are explicit slots.  
-3. **Ground it in real docs** — `cost item_origin.xlsx` + sample `INV_AE260703101` (see metrics below).  
-4. **Make output pasteable** — Public email draft vs Desk HTML cost sheet for Outlook / Excel.
-
-It is **not** a claim that custom software replaces ops judgment, margin control, or quote→INV SOP.
-
----
-
-## Validation (numbers)
-
-Sample INV non-air lines (**7**): Handling, CFS, Terminal, Document, Cartage, Tunnel, Parking.
-
-| Result | Share | Detail |
-|--------|------:|--------|
-| Exact master match | **2/7 (29%)** | Terminal Flat×C.W., Document Min |
-| Same formula, different amount | **2/7 (29%)** | Handling (Excel 150 vs INV **312**), CFS Min path |
-| Missing from Excel master | **3/7 (43%)** | Cartage / Tunnel / Parking → Desk slots |
-
-Full line table, formula, and limits: [`docs/검증-메트릭.md`](./docs/검증-메트릭.md)
-
----
-
-## Two modes
-
-| Mode | Who | What |
-|------|-----|------|
-| **Public Quote** | Shipper / nominee | Lane + dims + weight → C.W. + indicative air (USD) → Request Quote / **Copy Email Draft** |
-| **WAC Desk** | Internal | Same cargo + auto local master + Cartage/Tunnel/Parking slots + FX → Formal HKD/USD + **Copy Cost Sheet** |
-
-Local per-kg lines: `max(Min, Flat × C.W.)`.  
-C.W.: `max(gross, L×W×H / 6000)`.
-
----
-
-## Stack
-
-React 19 · TypeScript · Vite · Tailwind CSS v4 · Lucide · Vercel
-
-```
-src/
-  App.tsx              # Quote / Desk UI + routes
-  pages/HomePage.tsx   # Landing
-  pages/TrackPage.tsx  # AWB demo (not live airline API)
-  originCost.ts        # EXP local master + variable-slot engine
-  quoteDocument.ts     # Desk PDF / print HTML
-  fx.ts                # USD→HKD (Frankfurter + fallback 7.8)
-docs/
-  검증-메트릭.md
-  주간보고-Public-vs-Desk.md
-  변동비-고정비-UI방향.md
-  보고서-캡처/
-```
-
----
-
-## Run
+## Run locally (development)
 
 ```bash
 npm install
 npm run dev
 ```
 
-```bash
-npm run build
-npm run preview
-```
+Then open:
 
----
+- `http://localhost:5174/origin-cost-desk`
 
-## Honest limits
+## Key folders
 
-- Air rates are **mock** (no CargoAI / internal rate DB wired).  
-- Master amounts follow one monthly Excel pattern; slots default from one INV.  
-- Handling mismatch is documented on purpose — full auto-calc would hide real ops variance.  
-- CM internship deliverable is the **Excel simulator** (`excel-quote/`). Web Desk can import the same Master_DB for portfolio demo only.
+- `src/origin-cost-desk/`
+  - `OriginCostDeskSite.tsx`: main internal UI (Master DB, Input, Quotation, History)
+  - `cmExcelMaster.ts`: parse Master_DB from the Excel simulator workbook
+  - `cmDeskQuote.ts`: desk calculation (C.W., lines, Other/Exception behavior)
+  - `cmDeskDocument.ts`: quotation HTML/text builders
+  - `cmDeskPdf.ts`: which lines are visible on PDF (Other hiding rule)
+  - `components/`: `CmMasterEditor`, `CmDeskQuotePanel`
+- `src/quoteDocument.ts`
+  - shared browser print helper used by the desk PDF flow
 
----
+## Excel source file
 
-## Docs
+The desk UI loads the Excel simulator workbook from:
 
-| Doc | Purpose |
-|-----|---------|
-| [검증-메트릭.md](./docs/검증-메트릭.md) | Line matching + portfolio metrics |
-| [주간보고-Public-vs-Desk.md](./docs/주간보고-Public-vs-Desk.md) | Public vs Desk + ops questions |
-| [변동비-고정비-UI방향.md](./docs/변동비-고정비-UI방향.md) | Fixed vs variable cost framing |
-| [보고서-캡처/](./docs/보고서-캡처/) | Screenshots for demos / reports |
+- `public/excel/WAC_Air_Quotation_Simulator.xlsx`
 
----
+You can also download/import the same file from the UI to edit `Master_DB`.
 
-## Author
+## About cloud/API (optional)
 
-Internship / portfolio piece around WAC-style air quote workflows.  
-Built by Hyunseo Ok.
+There is an Excel-backed Python engine candidate under `excel-quote/` for future cloud API work.
+The current UI works fully on the client (Master parsing + calculation) for instant UX.
+

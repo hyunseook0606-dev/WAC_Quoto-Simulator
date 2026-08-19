@@ -1,5 +1,6 @@
 import type { CmDeskQuoteResult } from './cmDeskQuote'
 import { filterLinesForPdf } from './cmDeskPdf'
+
 function esc(s: string) {
   return s
     .replace(/&/g, '&amp;')
@@ -7,6 +8,16 @@ function esc(s: string) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
 }
+
+function markSrc() {
+  if (typeof window === 'undefined') return '/wac-mark-hero.png'
+  return `${window.location.origin}/wac-mark-hero.png`
+}
+
+const PRINT_FONT_FACE = `@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700;800;900&display=swap");
+  html, body, table, th, td, h1, h2, p, div, span {
+    font-family: "Noto Sans KR", "Malgun Gothic", Calibri, Arial, sans-serif;
+  }`
 
 export function buildCmDeskQuotationHtml(opts: {
   origin: string
@@ -52,13 +63,10 @@ export function buildCmDeskQuotationHtml(opts: {
     )
     .join('')
 
-  const hasExcelCargo =
-    Array.isArray(cargoSlots) && cargoSlots.length > 0
+  const hasExcelCargo = Array.isArray(cargoSlots) && cargoSlots.length > 0
+  const logo = markSrc()
 
-  // Note:
-  // - User requested to revert to the previous PDF layout style.
-  // - Keep the excel-like layout code but disable it for now.
-  if (false && hasExcelCargo) {
+  if (hasExcelCargo) {
     const chargeRowsExcel = pdfLines
       .map(
         (l) => `<tr>
@@ -84,19 +92,21 @@ export function buildCmDeskQuotationHtml(opts: {
       .join('')
 
     return `<!DOCTYPE html>
-<html>
+<html lang="ko">
 <head>
 <meta charset="utf-8"/>
 <title>WAC Air Freight Quotation ${esc(origin)}-${esc(destination)}</title>
 <style>
+  ${PRINT_FONT_FACE}
   @page { size: A4; margin: 10mm 12mm; }
   * { box-sizing: border-box; }
-  body { margin: 0; font-family: "Malgun Gothic", Calibri, Arial, sans-serif; color: #1A2A3A; font-size: 10.5pt; }
+  body { margin: 0; color: #1A2A3A; font-size: 10.5pt; }
 
   .bar { background: #1A2A3A; color: #fff; padding: 10px 16px; font-weight: 700; letter-spacing: .04em; display:flex; align-items:center; gap:10px; }
   h1 { margin: 12px 0 2px; font-size: 18pt; }
   .sub { color: #64748b; font-size: 9.5pt; margin: 0 0 10px; }
 
+  table { width: 100%; border-collapse: collapse; }
   .ship th, .ship td { border: 1px solid #cbd5e1; padding: 7px 10px; font-size: 10.5pt; }
   .ship .title { background:#1f2d3a; color:#fff; text-align:center; font-weight:700; }
   .ship th { background:#1f2d3a; color:#fff; width: 14%; text-align:left; font-weight:700; }
@@ -120,27 +130,31 @@ export function buildCmDeskQuotationHtml(opts: {
 
   .charges .grandBar td { background:#F05023; color:#fff; font-weight:800; text-align:center; padding: 8px 10px; }
   .charges .grandVal td { background:#fff7ed; font-weight:900; font-size: 18pt; padding: 10px 10px; text-align:right; }
+  .foot { margin-top: 12px; color: #64748b; font-size: 9pt; }
 </style>
 </head>
 <body>
-  <div class="bar"><img src="/wac-mark-hero.png" alt="WAC" style="height:18px; width:auto;" />WAC LOGISTICS</div>
+  <div class="bar"><img src="${logo}" alt="WAC" style="height:18px; width:auto;" />WAC LOGISTICS</div>
   <h1>AIR FREIGHT QUOTATION</h1>
-  <div class="sub">Approximate quote 쨌 Not a final invoice</div>
+  <div class="sub">Approximate quote · Not a final invoice</div>
 
   <table class="ship">
     <thead>
       <tr><th class="title" colspan="6">Shipment</th></tr>
     </thead>
     <tbody>
+      ${consignee.trim() ? `<tr>
+        <th>Consignee</th><td colspan="5">${esc(consignee)}</td>
+      </tr>` : ''}
       <tr>
-        <th>Route</th><td colspan="1" class="center">${esc(quote.route)}</td>
-        <th>B/L</th><td colspan="1" class="center">${Number.isFinite(blCount) && blCount > 0 ? blCount : 1}</td>
-        <th>Currency</th><td colspan="1" class="center">${esc(quote.currency)}</td>
+        <th>Route</th><td class="center">${esc(quote.route)}</td>
+        <th>B/L</th><td class="center">${Number.isFinite(blCount) && blCount > 0 ? blCount : 1}</td>
+        <th>Currency</th><td class="center">${esc(quote.currency)}</td>
       </tr>
       <tr>
-        <th>C.W.</th><td colspan="1" class="center">${quote.cw.toFixed(2)}</td>
-        <th>Break</th><td colspan="1" class="center">${esc(quote.breakLabel)}</td>
-        <td colspan="2"></td>
+        <th>C.W.</th><td class="center">${quote.cw.toFixed(2)}</td>
+        <th>CBM</th><td class="center">${quote.cbm.toFixed(3)}</td>
+        <th>Break</th><td class="center">${esc(quote.breakLabel)}</td>
       </tr>
       <tr>
         <th>Carrier</th><td colspan="5">${esc(carrierCode)}</td>
@@ -172,16 +186,10 @@ export function buildCmDeskQuotationHtml(opts: {
   </table>
 
   <table class="remarkTable">
-    <thead>
-      <tr>
-        <th>Remark</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td>${remark.trim() ? esc(remark) : ''}</td>
-      </tr>
-    </tbody>
+    <tr>
+      <th>Remark</th>
+      <td>${remark.trim() ? esc(remark) : ''}</td>
+    </tr>
   </table>
 
   <div style="height:10px"></div>
@@ -196,22 +204,24 @@ export function buildCmDeskQuotationHtml(opts: {
     <tbody>
       ${chargeRowsExcel}
       <tr class="grandBar"><td colspan="2">TOTAL APPX. AMOUNT</td></tr>
-      <tr class="grandVal"><td colspan="2">${quote.total.toFixed(2)}</td></tr>
+      <tr class="grandVal"><td colspan="2">${cur} ${quote.total.toFixed(2)}</td></tr>
     </tbody>
   </table>
+  <div class="foot">This quotation is indicative and subject to confirmation.</div>
 </body>
 </html>`
   }
 
   return `<!DOCTYPE html>
-<html>
+<html lang="ko">
 <head>
 <meta charset="utf-8"/>
 <title>WAC Air Freight Quotation ${esc(origin)}-${esc(destination)}</title>
 <style>
+  ${PRINT_FONT_FACE}
   @page { size: A4; margin: 16mm 14mm; }
   * { box-sizing: border-box; }
-  body { margin: 0; font-family: "Malgun Gothic", Calibri, Arial, sans-serif; color: #1A2A3A; font-size: 11pt; background:#ffffff; }
+  body { margin: 0; color: #1A2A3A; font-size: 11pt; background:#ffffff; }
   .sheet { border: 1px solid #e2e8f0; border-radius: 14px; padding: 18px 18px 16px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06); }
   .header { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom: 10px; }
   .brand { display:flex; align-items:center; gap:12px; }
@@ -240,19 +250,19 @@ export function buildCmDeskQuotationHtml(opts: {
   <div class="sheet">
   <div class="header">
     <div class="brand">
-      <img class="brandMark" src="/wac-mark-hero.png" alt="WAC" />
+      <img class="brandMark" src="${logo}" alt="WAC" />
       <div class="brandText">WAC LOGISTICS</div>
     </div>
     <div class="quoteBadge">Air Freight Quote</div>
   </div>
   <div class="accent"></div>
   <h1>AIR FREIGHT QUOTATION</h1>
-  <div class="sub">Approximate quote</div>
+  <div class="sub">Approximate quote · Not a final invoice</div>
   <table class="meta">
     ${consignee.trim() ? `<tr><th>Consignee</th><td>${esc(consignee)}</td></tr>` : ''}
-    <tr><th>Route</th><td>${esc(origin)} ??${esc(destination)} 쨌 ${esc(quote.route)}</td></tr>
+    <tr><th>Route</th><td>${esc(origin)} → ${esc(destination)} · ${esc(quote.route)}</td></tr>
     <tr><th>Cargo</th><td>${esc(cargoSummary)}</td></tr>
-    <tr><th>C.W. / CBM</th><td><b>${quote.cw.toFixed(2)} kg</b> 쨌 ${quote.cbm.toFixed(3)} CBM 쨌 Break ${esc(quote.breakLabel)}</td></tr>
+    <tr><th>C.W. / CBM</th><td><b>${quote.cw.toFixed(2)} kg</b> · ${quote.cbm.toFixed(3)} CBM · Break ${esc(quote.breakLabel)}</td></tr>
     <tr><th>Carrier</th><td>${esc(carrierCode)}</td></tr>
     <tr><th>Currency</th><td>${cur}</td></tr>
     ${remark.trim() ? `<tr><th>Remark</th><td>${esc(remark)}</td></tr>` : ''}

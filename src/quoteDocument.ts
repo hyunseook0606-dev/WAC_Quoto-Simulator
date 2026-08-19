@@ -60,9 +60,10 @@ export function buildDeskQuotationHtml(opts: {
 <meta charset="utf-8"/>
 <title>WAC Air Freight Quotation ${esc(origin)}-${esc(destination)}</title>
 <style>
+  @import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700;800;900&display=swap");
   @page { size: A4; margin: 16mm 14mm; }
   * { box-sizing: border-box; }
-  body { margin: 0; font-family: "Malgun Gothic", Calibri, Arial, sans-serif; color: #1A2A3A; font-size: 11pt; }
+  body { margin: 0; font-family: "Noto Sans KR", "Malgun Gothic", Calibri, Arial, sans-serif; color: #1A2A3A; font-size: 11pt; }
   .bar { background: #1A2A3A; color: #fff; padding: 10px 16px; font-weight: 700; letter-spacing: .04em; }
   h1 { margin: 14px 0 4px; font-size: 22pt; }
   .sub { color: #64748b; font-size: 10pt; margin-bottom: 16px; }
@@ -127,14 +128,41 @@ export function printQuotation(html: string) {
   doc.open()
   doc.write(html)
   doc.close()
-  const run = () => {
-    iframe.contentWindow?.focus()
-    iframe.contentWindow?.print()
+
+  const run = async () => {
+    const win = iframe.contentWindow
+    const idoc = iframe.contentDocument
+    if (!win || !idoc) {
+      iframe.remove()
+      return
+    }
+    try {
+      if (idoc.fonts?.ready) await idoc.fonts.ready
+    } catch {
+      // keep going with system fallback fonts
+    }
+    const images = Array.from(idoc.images)
+    await Promise.all(
+      images.map((img) =>
+        img.complete
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => {
+              img.onload = () => resolve()
+              img.onerror = () => resolve()
+            }),
+      ),
+    )
+    await new Promise((r) => window.setTimeout(r, 120))
+    win.focus()
+    win.print()
     window.setTimeout(() => iframe.remove(), 1500)
   }
+
   if (iframe.contentDocument?.readyState === 'complete') {
-    window.setTimeout(run, 250)
+    void run()
   } else {
-    iframe.onload = () => window.setTimeout(run, 250)
+    iframe.onload = () => {
+      void run()
+    }
   }
 }

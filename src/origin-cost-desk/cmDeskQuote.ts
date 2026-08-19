@@ -1,5 +1,5 @@
 /**
- * Excel ?낅젰 ?쒗듃: Master 李멸퀬(I) + ?덉쇅(J) ??TOTAL
+ * Excel 입력 시트: Master 참고(I) + 예외(J) → TOTAL
  */
 import type { CmLocalRate, CmMaster } from './cmExcelMaster'
 import {

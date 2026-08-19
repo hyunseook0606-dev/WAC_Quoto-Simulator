@@ -127,7 +127,7 @@ export function OriginCostDeskSite() {
       })),
   )
 
-  // Excel C34 (fx): for HKD-native lanes use 1.0, for USD??HKD set value.
+  // Excel C34 (fx): for HKD-native lanes use 1.0, for USD→HKD set value.
   const [fxDraft, setFxDraft] = useState('1')
 
   const [carrierCode, setCarrierCode] = useState('KE')
@@ -138,9 +138,9 @@ export function OriginCostDeskSite() {
   const [otherLabels, setOtherLabels] = useState<Record<string, string>>({})
   const [otherUnits, setOtherUnits] = useState<Record<string, string>>({})
 
-  // Optional: allow adding dynamic extra ??Other??rows beyond other1??other12.
+  // Optional: allow adding dynamic extra Other rows beyond other1–other12.
   const [extraOthers, setExtraOthers] = useState<CmExtraOther[]>([])
-  // Excel-like: users can delete/re-add fixed Other slots (other1??other12).
+  // Excel-like: users can delete/re-add fixed Other slots (other1–other12).
   const [disabledFixedOtherIds, setDisabledFixedOtherIds] = useState<string[]>(
     [],
   )
@@ -421,7 +421,7 @@ export function OriginCostDeskSite() {
   }
 
   const addOtherRow = () => {
-    // 1) Re-enable a previously deleted fixed slot (other1??other12)
+    // 1) Re-enable a previously deleted fixed slot (other1–other12)
     const firstDisabled = Array.from(
       { length: TOTAL_OTHER_SLOTS },
       (_, i) => `other${i + 1}`,
@@ -433,7 +433,7 @@ export function OriginCostDeskSite() {
       return
     }
 
-    // 2) Otherwise add a dynamic extra row (beyond other1??other12)
+    // 2) Otherwise add a dynamic extra row (beyond other1–other12)
     setExtraOthers((rows) => [
       ...rows,
       {
@@ -510,7 +510,7 @@ export function OriginCostDeskSite() {
           const Q = Math.max(0, matches[i + 3])
           const GW = Math.max(0, matches[i + 4])
 
-          // Basic ??is empty slot???check: if L/W/H/Q/GW are all 0, stop.
+          // Basic "is empty slot" check: if L/W/H/Q/GW are all 0, stop.
           if (L === 0 && W === 0 && H === 0 && Q === 0 && GW === 0) break
 
           next[slot] = {
@@ -633,7 +633,7 @@ export function OriginCostDeskSite() {
       const cbm = (L * W * H * Q) / 1_000_000
       const cw = Math.max(GW, cbm * 167)
 
-      // Excel PDF shows Gross as rounded (e.g. 194.5 ??195)
+      // Excel PDF shows Gross as rounded (e.g. 194.5 → 195)
       return {
         index: i + 1,
         dimensionsText: `${Math.round(L)} x ${Math.round(W)} x ${Math.round(H)}`,
@@ -918,7 +918,7 @@ export function OriginCostDeskSite() {
                 Route
               </p>
               <p className="mt-1 text-lg font-extrabold text-wac-navy">
-                {origin} ??{destination}
+                {origin} → {destination}
               </p>
             </div>
             <div className="bg-white px-4 py-3">
@@ -995,7 +995,7 @@ export function OriginCostDeskSite() {
                         const next = await parseCmMasterFile(file)
                         setMaster(next)
                         setCmImportMsg(
-                          `Loaded ${next.air.length} routes ?${next.local.length} local charges`,
+                          `Loaded ${next.air.length} routes · ${next.local.length} local charges`,
                         )
                       } catch (err) {
                         setCmImportMsg(
@@ -1043,7 +1043,7 @@ export function OriginCostDeskSite() {
             >
               <div className="border-b border-slate-200 bg-slate-50 px-5 py-4">
                 <h2 className="text-xl font-extrabold text-white bg-[#243447] px-4 py-2 inline-flex rounded">
-                  ?? ??? ?????
+                  항공 가견적 시뮬레이터
                 </h2>
               </div>
 
@@ -1055,7 +1055,7 @@ export function OriginCostDeskSite() {
                         colSpan={4}
                         className="bg-[#F05023] px-3 py-2.5 text-left text-white text-sm font-extrabold uppercase tracking-wide"
                       >
-                        1. ?? ??
+                        1. 화물 입력
                       </th>
                     </tr>
                     <tr className="border-t border-slate-200">
@@ -1375,17 +1375,17 @@ export function OriginCostDeskSite() {
                     </tr>
                     <tr className="border-t-2 border-slate-200 bg-slate-50">
                       <th colSpan={4} className="px-3 py-3 text-left font-extrabold text-slate-700">
-                        2. ??? ??
+                        2. 자동 계산
                       </th>
                     </tr>
                     <tr className="border-t border-slate-200">
                       <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">CBM</th>
                       <td className="bg-emerald-50 px-3 py-2 font-black text-emerald-700">{cargoCbm.toFixed(3)}</td>
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">???</th>
+                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">실중량</th>
                       <td className="bg-emerald-50 px-3 py-2 font-black text-emerald-700">{cargoGross.toFixed(2)}</td>
                     </tr>
                     <tr className="border-t border-slate-200">
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">????</th>
+                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">볼륨중량</th>
                       <td className="bg-emerald-50 px-3 py-2 font-black text-emerald-700">{chargeableWeight.toFixed(2)}</td>
                       <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">C.W.</th>
                       <td className="bg-emerald-100 px-3 py-2 font-black text-emerald-800">{effectiveCw.toFixed(2)}</td>
@@ -1445,7 +1445,7 @@ export function OriginCostDeskSite() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="text-[11px] font-bold tracking-wider text-wac-navy uppercase">
-                        3. ?? ???
+                        3. 비용 내역
                       </p>
                     </div>
                     <button
@@ -1470,12 +1470,12 @@ export function OriginCostDeskSite() {
                     </colgroup>
                     <thead>
                       <tr className="bg-[#243447] text-white text-[10px] font-bold uppercase tracking-wider">
-                        <th className="px-3 py-2.5">??</th>
-                        <th className="px-3 py-2.5">??</th>
-                        <th className="px-3 py-2.5 text-right">??</th>
-                        <th className="px-3 py-2.5 text-right">??(J)</th>
+                        <th className="px-3 py-2.5">항목</th>
+                        <th className="px-3 py-2.5">단위</th>
+                        <th className="px-3 py-2.5 text-right">참고</th>
+                        <th className="px-3 py-2.5 text-right">예외(J)</th>
                         <th className="px-3 py-2.5 text-right">TOTAL</th>
-                        <th className="w-12 px-3 py-2.5 text-center">??</th>
+                        <th className="w-12 px-3 py-2.5 text-center">삭제</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1725,7 +1725,7 @@ export function OriginCostDeskSite() {
                         className="h-9 w-full rounded-md border border-amber-200 bg-white px-2 text-sm font-bold text-slate-800 shadow-sm outline-none focus:border-wac-orange"
                         value={deskRemark}
                         onChange={(e) => setDeskRemark(e.target.value)}
-                        placeholder="KEEP COOL / 2-8캜"
+                        placeholder="KEEP COOL / 2–8°C"
                       />
                     </div>
                   </div>
@@ -1749,7 +1749,7 @@ export function OriginCostDeskSite() {
             {!deskQuote ? (
               <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
                 <p className="text-sm font-semibold text-slate-600">
-                  Calculate in ??? tab first.
+                  Calculate in Input tab first.
                 </p>
               </div>
             ) : (
@@ -1764,7 +1764,8 @@ export function OriginCostDeskSite() {
                         {deskQuote.currency} {deskQuote.total.toFixed(2)}
                       </p>
                       <p className="mt-1 text-sm text-slate-600">
-                        Route {deskQuote.route} ?Break {esc(deskQuote.breakLabel)} ?                        C.W. {deskQuote.cw.toFixed(2)} / CBM {deskQuote.cbm.toFixed(3)}
+                        Route {deskQuote.route} · Break {esc(deskQuote.breakLabel)} ·
+                        C.W. {deskQuote.cw.toFixed(2)} / CBM {deskQuote.cbm.toFixed(3)}
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -1805,12 +1806,12 @@ export function OriginCostDeskSite() {
 
                     <div className="bg-[#F4F7FB] px-3 py-2 text-xs font-bold text-slate-600">C.W.</div>
                     <div className="px-3 py-2 text-sm font-extrabold text-emerald-800 bg-emerald-50 rounded">
-                      {deskQuote.cw.toFixed(2)} kg ?Break {esc(deskQuote.breakLabel)}
+                      {deskQuote.cw.toFixed(2)} kg · Break {esc(deskQuote.breakLabel)}
                     </div>
 
                     <div className="bg-[#F4F7FB] px-3 py-2 text-xs font-bold text-slate-600">Currency / FX</div>
                     <div className="px-3 py-2 text-sm font-bold text-slate-800">
-                      {deskQuote.currency} ?Ex.Rate {deskQuote.fx.toFixed(4)}
+                      {deskQuote.currency} · Ex.Rate {deskQuote.fx.toFixed(4)}
                     </div>
 
                     <div className="bg-[#F4F7FB] px-3 py-2 text-xs font-bold text-slate-600">Carrier</div>
@@ -1969,15 +1970,15 @@ export function OriginCostDeskSite() {
                           >
                             <div>
                               <div className="text-sm font-extrabold text-slate-800">
-                                {item.consignee ? `${item.consignee} ?` : ''}
-                                {item.origin}-{item.destination} ?{item.currency}{' '}
+                                {item.consignee ? `${item.consignee} · ` : ''}
+                                {item.origin}-{item.destination} · {item.currency}{' '}
                                 {item.total.toFixed(2)}
                               </div>
                               <div className="text-xs font-semibold text-slate-500">
                                 {new Date(item.createdAt).toLocaleDateString(
                                   'en-GB',
                                 )}{' '}
-                                ?CBM {item.cbm.toFixed(3)} ?C.W.{' '}
+                                · CBM {item.cbm.toFixed(3)} · C.W.{' '}
                                 {item.cw.toFixed(2)}
                               </div>
                             </div>

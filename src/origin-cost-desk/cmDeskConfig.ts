@@ -1,4 +1,4 @@
-/** Excel ?낅젰 Other 1?? (Master-linked) + Other 7??2 (manual) + dynamic extras */
+/** Excel 입력 Other 1–6 (Master-linked) + Other 7–12 (manual) + dynamic extras */
 export const MASTER_OTHER_COUNT = 6
 export const MANUAL_OTHER_COUNT = 6
 export const TOTAL_OTHER_SLOTS = MASTER_OTHER_COUNT + MANUAL_OTHER_COUNT
