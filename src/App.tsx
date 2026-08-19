@@ -4,40 +4,26 @@ import {
   Plane,
   Box,
   ArrowRight,
-  Copy,
-  CheckCircle2,
   Loader2,
   Calculator,
   Lock,
   FileSpreadsheet,
-  Plus,
-  Trash2,
-  Printer,
 } from 'lucide-react'
-import {
-  VARIABLE_SLOT_DEFAULTS,
-  MASTER_VALIDITY,
-  DEFAULT_USD_HKD,
-  ALWAYS_ON_LOCAL,
-  buildDeskCostSheet,
-  calcLineAmount,
-  type DeskFlags,
-  type VariableSlots,
-  type LineOverrides,
-  type ExtraCharge,
-} from './originCost'
-import { buildDeskQuotationHtml, printQuotation } from './quoteDocument'
 import { PublicQuoteDHL } from './components/PublicQuoteDHL'
+import { CmDeskQuotePanel, buildCmDeskPlainTable, printCmDeskQuote } from './origin-cost-desk/components/CmDeskQuotePanel'
+import { CmMasterEditor } from './origin-cost-desk/components/CmMasterEditor'
 import { SiteFooter, SiteHeader, Reveal } from './chrome'
 import { HomePage } from './pages/HomePage'
 import { TrackPage } from './pages/TrackPage'
-import { fetchUsdToHkd } from './fx'
+import { OriginCostDeskSite } from './origin-cost-desk/OriginCostDeskSite'
 import {
   calcCmQuote,
   parseCmMasterFile,
   parseCmMasterFromWorkbook,
   type CmMaster,
-} from './cmExcelMaster'
+} from './origin-cost-desk/cmExcelMaster'
+import { calcCmDeskQuote, parseCmExceptions } from './origin-cost-desk/cmDeskQuote'
+import type { CmExtraOther } from './origin-cost-desk/cmDeskConfig'
 import * as XLSX from 'xlsx'
 
 type Cargo = {
@@ -49,7 +35,7 @@ type Cargo = {
 
 /**
  * ex-HKG major carriers from:
- * 홍콩 항공수출업무 2026JULY.docx
+ * ??? ?????????? 2026JULY.docx
  * RH/SQ weight breaks from WAC customer quote email (mock until CargoAI/DB).
  */
 const CARRIERS = [
@@ -352,7 +338,7 @@ Quote valid until: ${validUntil}
 
 Kindly find the rate as below (All in USD)
 
-${carrier.code} — ${carrier.name} (AWB Prefix ${carrier.prefix})
+${carrier.code} ??${carrier.name} (AWB Prefix ${carrier.prefix})
 ${plainTable}
 MYC at $${carrier.fuelPerKg.toFixed(2)}/kg on C.W.
 ${extraPlain}CG fee at $${carrier.cgFee.toFixed(2)}/MAWB
@@ -366,7 +352,7 @@ ${exWorkPlain}
 
 * Subject to final capacity, equipment availability and WAC confirmation.
 Best regards,
-WAC Logistics — Digital Freight Desk`
+WAC Logistics ??Digital Freight Desk`
 
   const html = `<!DOCTYPE html>
 <html><body style="font-family:Calibri,Arial,sans-serif;font-size:12pt;color:#1A2A3A;line-height:1.45;">
@@ -380,7 +366,7 @@ WAC Logistics — Digital Freight Desk`
 <br/>
 <div>Kindly find the rate as below (All in USD)</div>
 <br/>
-<div><u><b>${escapeHtml(carrier.code)}</b></u> — ${escapeHtml(carrier.name)} (AWB Prefix ${escapeHtml(carrier.prefix)})</div>
+<div><u><b>${escapeHtml(carrier.code)}</b></u> ??${escapeHtml(carrier.name)} (AWB Prefix ${escapeHtml(carrier.prefix)})</div>
 <br/>
 ${htmlTable}
 <br/>
@@ -397,132 +383,7 @@ ${exWorkHtml}
 <br/>
 <div style="color:#64748b;font-size:10pt;">* Subject to final capacity, equipment availability and WAC confirmation.</div>
 <br/>
-<div>Best regards,<br/>WAC Logistics — Digital Freight Desk</div>
-</body></html>`
-
-  return { html, plain }
-}
-
-/** Desk formal cost sheet — HTML table for Outlook + TSV for Excel paste */
-function buildDeskCostSheetDraft(opts: {
-  origin: string
-  destination: string
-  length: number
-  width: number
-  height: number
-  weight: number
-  cw: number
-  carrierCode: string
-  carrierName: string
-  usdHkd: number
-  deskSheet: NonNullable<ReturnType<typeof buildDeskCostSheet>>
-}): { html: string; plain: string } {
-  const {
-    origin,
-    destination,
-    length,
-    width,
-    height,
-    weight,
-    cw,
-    carrierCode,
-    carrierName,
-    usdHkd,
-    deskSheet,
-  } = opts
-
-  const groupLabel = (g: string) =>
-    g === 'air' ? 'Air' : g === 'local' ? 'Local master' : 'Variable'
-
-  const headers = ['Charge', 'Type', 'Currency', 'Amount']
-  const rows = deskSheet.lines.map((l) => [
-    l.label,
-    groupLabel(l.group),
-    l.currency,
-    l.amount.toFixed(2),
-  ])
-
-  const plainMeta = [
-    'WAC Freight Desk — Formal Origin Cost',
-    `Lane\t${origin} → ${destination}`,
-    `Dims\t${length} x ${width} x ${height} cm`,
-    `Gross / C.W.\t${weight.toFixed(1)} / ${cw.toFixed(1)} KGS`,
-    `Carrier\t${carrierCode} ${carrierName}`,
-    `Master\t${MASTER_VALIDITY.effective} → ${MASTER_VALIDITY.expiry}`,
-    `FX USD/HKD\t${usdHkd.toFixed(4)}`,
-    '',
-  ].join('\n')
-
-  const plainTable = [
-    headers.join('\t'),
-    ...rows.map((r) => r.join('\t')),
-    '',
-    ['Air (HKD)', '', 'HKD', deskSheet.airHkd.toFixed(2)].join('\t'),
-    ['Local master (HKD)', '', 'HKD', deskSheet.localHkd.toFixed(2)].join('\t'),
-    [
-      'Variable slots (HKD)',
-      '',
-      'HKD',
-      deskSheet.variableHkd.toFixed(2),
-    ].join('\t'),
-    ['TOTAL', '', 'HKD', deskSheet.totalHkd.toFixed(2)].join('\t'),
-    ['TOTAL', '', 'USD', deskSheet.totalUsd.toFixed(2)].join('\t'),
-  ].join('\n')
-
-  const plain = `${plainMeta}
-${plainTable}
-
-* Variable slots (Cartage / Tunnel / Parking) entered per shipment.
-* Local lines from cost item_origin EXP master (auto max(min, flat×cw)).
-`
-
-  const th = (h: string, align = 'left') =>
-    `<th style="text-align:${align};padding:8px 10px;border:1px solid #94a3b8;background:#1A2A3A;color:#fff;font-weight:700;">${escapeHtml(h)}</th>`
-
-  const td = (v: string, align = 'left', bold = false) =>
-    `<td style="text-align:${align};padding:7px 10px;border:1px solid #cbd5e1;${bold ? 'font-weight:700;' : ''}">${escapeHtml(v)}</td>`
-
-  const htmlRows = rows
-    .map(
-      (r) =>
-        `<tr>${td(r[0])}${td(r[1])}${td(r[2], 'center')}${td(r[3], 'right', true)}</tr>`,
-    )
-    .join('')
-
-  const sumRow = (label: string, amount: string, accent = false) =>
-    `<tr style="${accent ? 'background:#F05023;color:#fff;' : 'background:#f8fafc;'}">
-      <td colspan="3" style="padding:8px 10px;border:1px solid #94a3b8;font-weight:700;">${escapeHtml(label)}</td>
-      <td style="padding:8px 10px;border:1px solid #94a3b8;text-align:right;font-weight:700;">${escapeHtml(amount)}</td>
-    </tr>`
-
-  const html = `<!DOCTYPE html>
-<html><body style="font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1A2A3A;line-height:1.4;">
-<div style="font-size:14pt;font-weight:700;color:#1A2A3A;">WAC Freight Desk — Formal Origin Cost</div>
-<br/>
-<table cellpadding="4" cellspacing="0" border="0" style="font-family:Calibri,Arial,sans-serif;font-size:11pt;">
-  <tr><td style="padding:2px 16px 2px 0;color:#64748b;">Lane</td><td><b>${escapeHtml(origin)} → ${escapeHtml(destination)}</b></td></tr>
-  <tr><td style="padding:2px 16px 2px 0;color:#64748b;">Dims / Weight</td><td>${length} x ${width} x ${height} cm · Gross ${weight.toFixed(1)} · C.W. <b>${cw.toFixed(1)} KGS</b></td></tr>
-  <tr><td style="padding:2px 16px 2px 0;color:#64748b;">Carrier</td><td><b>${escapeHtml(carrierCode)}</b> ${escapeHtml(carrierName)}</td></tr>
-  <tr><td style="padding:2px 16px 2px 0;color:#64748b;">Local master</td><td>${MASTER_VALIDITY.effective} → ${MASTER_VALIDITY.expiry}</td></tr>
-  <tr><td style="padding:2px 16px 2px 0;color:#64748b;">FX USD/HKD</td><td>${usdHkd.toFixed(4)}</td></tr>
-</table>
-<br/>
-<table cellpadding="0" cellspacing="0" border="1" style="border-collapse:collapse;border-color:#94a3b8;font-family:Calibri,Arial,sans-serif;font-size:11pt;width:100%;max-width:640px;">
-  <thead>
-    <tr>${th('Charge')}${th('Type')}${th('Currency', 'center')}${th('Amount', 'right')}</tr>
-  </thead>
-  <tbody>
-    ${htmlRows}
-    ${sumRow('Air subtotal (HKD)', `HKD ${deskSheet.airHkd.toFixed(2)}`)}
-    ${sumRow('Local master (HKD)', `HKD ${deskSheet.localHkd.toFixed(2)}`)}
-    ${sumRow('Variable slots (HKD)', `HKD ${deskSheet.variableHkd.toFixed(2)}`)}
-    ${sumRow('TOTAL HKD', `HKD ${deskSheet.totalHkd.toFixed(2)}`, true)}
-    ${sumRow('TOTAL USD', `USD ${deskSheet.totalUsd.toFixed(2)}`, true)}
-  </tbody>
-</table>
-<br/>
-<div style="color:#64748b;font-size:9pt;">* Variable / added lines entered per shipment. Exception amounts override Master for this job only.</div>
-<div style="color:#64748b;font-size:9pt;">* Local lines from EXP master — auto max(min, flat × C.W.) unless exception filled.</div>
+<div>Best regards,<br/>WAC Logistics ??Digital Freight Desk</div>
 </body></html>`
 
   return { html, plain }
@@ -557,51 +418,22 @@ function QuoteWorkspace() {
   const [isLoading, setIsLoading] = useState(false)
   const [toast, setToast] = useState('')
   const [formError, setFormError] = useState('')
-  /** public = shipper indicative · desk = internal cost with variable slots */
+  /** public = shipper indicative ? desk = internal cost with variable slots */
   const [quoteMode, setQuoteMode] = useState<'public' | 'desk'>(
     searchParams.get('mode') === 'desk' ? 'desk' : 'public',
   )
-  const [deskCarrier, setDeskCarrier] = useState('')
-  const [usdHkd, setUsdHkd] = useState(DEFAULT_USD_HKD)
-  const [fxMeta, setFxMeta] = useState<{
-    asOf: string
-    source: 'live' | 'fallback' | 'manual'
-  }>({ asOf: '', source: 'fallback' })
-  const [fxLoading, setFxLoading] = useState(false)
-  const [deskFlags, setDeskFlags] = useState<DeskFlags>({
-    xray: false,
-    uld: false,
-    dg: false,
-    whReg: false,
-  })
-  const [slots, setSlots] = useState<VariableSlots>({
-    cartage: VARIABLE_SLOT_DEFAULTS.cartage,
-    tunnel: VARIABLE_SLOT_DEFAULTS.tunnel,
-    parking: VARIABLE_SLOT_DEFAULTS.parking,
-    other: VARIABLE_SLOT_DEFAULTS.other,
-    otherLabel: 'Other / Ad-hoc',
-  })
-  const [overrides, setOverrides] = useState<LineOverrides>({})
-  const [overrideDraft, setOverrideDraft] = useState<Record<string, string>>({})
-  const [extraLines, setExtraLines] = useState<ExtraCharge[]>([])
+  const [deskCarrier, setDeskCarrier] = useState('KE')
+  const [cmExceptionDraft, setCmExceptionDraft] = useState<Record<string, string>>({})
+  const [cmOtherLabels, setCmOtherLabels] = useState<Record<string, string>>({})
+  const [cmOtherUnits, setCmOtherUnits] = useState<Record<string, string>>({})
+  const [cmExtraOthers, setCmExtraOthers] = useState<CmExtraOther[]>([])
+  const [blCount, setBlCount] = useState(1)
+  const [cmFxRate, setCmFxRate] = useState(1)
   const [deskRemark, setDeskRemark] = useState('')
   const [cmMaster, setCmMaster] = useState<CmMaster | null>(null)
   const [cmQty, setCmQty] = useState(1)
   const [cmImportMsg, setCmImportMsg] = useState('')
   const cmFileRef = useRef<HTMLInputElement>(null)
-
-
-  const refreshFx = async () => {
-    setFxLoading(true)
-    const result = await fetchUsdToHkd()
-    setUsdHkd(Number(result.rate.toFixed(4)))
-    setFxMeta({ asOf: result.asOf, source: result.source })
-    setFxLoading(false)
-  }
-
-  useEffect(() => {
-    void refreshFx()
-  }, [])
 
   /** Excel Master_DB is the rate backend for Instant Quote */
   useEffect(() => {
@@ -656,24 +488,39 @@ function QuoteWorkspace() {
 
   const bestPublic = quotes[0]
 
-  const selectedDeskQuote = useMemo(() => {
-    if (!quotes.length) return null
-    return quotes.find((q) => q.code === deskCarrier) ?? quotes[0]
-  }, [quotes, deskCarrier])
-
-  const deskSheet = useMemo(() => {
-    if (!selectedDeskQuote) return null
-    return buildDeskCostSheet({
-      cw,
-      airUsd: selectedDeskQuote.total,
-      airLabel: `Air Freight (${selectedDeskQuote.code} ${selectedDeskQuote.name})`,
-      flags: deskFlags,
-      slots,
-      usdHkd,
-      overrides,
-      extraLines,
+  const cmDeskQuote = useMemo(() => {
+    if (!cmMaster || quoteMode !== 'desk') return null
+    return calcCmDeskQuote(cmMaster, {
+      origin,
+      destination,
+      length: Number(cargo.length) || 0,
+      width: Number(cargo.width) || 0,
+      height: Number(cargo.height) || 0,
+      qty: cmQty,
+      gross: Number(cargo.weight) || 0,
+      blCount,
+      fx: cmFxRate,
+      exceptions: parseCmExceptions(cmExceptionDraft),
+      otherLabels: cmOtherLabels,
+      otherUnits: cmOtherUnits,
+      extraOthers: cmExtraOthers,
     })
-  }, [cw, selectedDeskQuote, deskFlags, slots, usdHkd, overrides, extraLines])
+  }, [
+    cmMaster,
+    quoteMode,
+    origin,
+    destination,
+    cargo,
+    cmQty,
+    blCount,
+    cmFxRate,
+    cmExceptionDraft,
+    cmOtherLabels,
+    cmOtherUnits,
+    cmExtraOthers,
+  ])
+
+  const deskCw = cmDeskQuote?.cw ?? cw
 
   const quoteValidUntil = useMemo(() => formatValidUntil(7), [showResult])
 
@@ -685,7 +532,7 @@ function QuoteWorkspace() {
     const o = origin.trim().toUpperCase()
     const d = destination.trim().toUpperCase()
     if (!o || !d) {
-      setFormError('출발지와 도착지 공항 코드(예: SIN, HKG)를 입력해 주세요.')
+      setFormError('????? ???? ?? ??(?? SIN, HKG)???????????')
       return
     }
     if (
@@ -693,7 +540,7 @@ function QuoteWorkspace() {
         (n) => Number.isFinite(n) && n > 0,
       )
     ) {
-      setFormError('치수와 실중량을 올바르게 입력해 주세요.')
+      setFormError('???? ?????? ????? ?????????')
       return
     }
     setFormError('')
@@ -754,13 +601,13 @@ function QuoteWorkspace() {
     try {
       await copyRichEmail(html, plain)
       setCopied(carrier.code)
-      setToast('표 형식 이메일 초안 복사됨 — Outlook에 붙여넣기')
+      setToast('????? ??????? ??????Outlook???????')
       window.setTimeout(() => {
         setCopied('')
         setToast('')
       }, 2200)
     } catch {
-      setToast('클립보드 복사에 실패했습니다.')
+      setToast('????? ?????????????.')
       window.setTimeout(() => setToast(''), 2200)
     }
   }
@@ -771,63 +618,43 @@ function QuoteWorkspace() {
       `[Quote Request] ${origin}-${destination} / ${carrier.code} / ${cw.toFixed(1)}KGS`,
     )
     const body = encodeURIComponent(
-      `Hello WAC Logistics,\n\nI would like an official quote for the below shipment.\n\nLane: ${origin} → ${destination}\nDims: ${cargo.length} x ${cargo.width} x ${cargo.height} cm\nGross: ${Number(cargo.weight).toFixed(1)} KGS\nC.W.: ${cw.toFixed(1)} KGS\nPreferred carrier: ${carrier.code} (${carrier.name})\nIndicative air total (web): USD ${carrier.total.toFixed(2)}\n\nPlease confirm allotment, final rate, origin local & trucking, and transit.\n\nThank you.`,
+      `Hello WAC Logistics,\n\nI would like an official quote for the below shipment.\n\nLane: ${origin} ??${destination}\nDims: ${cargo.length} x ${cargo.width} x ${cargo.height} cm\nGross: ${Number(cargo.weight).toFixed(1)} KGS\nC.W.: ${cw.toFixed(1)} KGS\nPreferred carrier: ${carrier.code} (${carrier.name})\nIndicative air total (web): USD ${carrier.total.toFixed(2)}\n\nPlease confirm allotment, final rate, origin local & trucking, and transit.\n\nThank you.`,
     )
     window.location.href = `mailto:service@waclogistics.com?subject=${subject}&body=${body}`
   }
 
-  const handleCopyDeskSheet = async () => {
-    if (!deskSheet || !selectedDeskQuote) return
-    const { html, plain } = buildDeskCostSheetDraft({
-      origin,
-      destination,
-      length: cargo.length,
-      width: cargo.width,
-      height: cargo.height,
-      weight: Number(cargo.weight),
-      cw,
-      carrierCode: selectedDeskQuote.code,
-      carrierName: selectedDeskQuote.name,
-      usdHkd,
-      deskSheet,
-    })
+  const handleCopyCmDesk = async () => {
+    if (!cmDeskQuote) return
+    const plain = buildCmDeskPlainTable(cmDeskQuote)
     try {
-      await copyRichEmail(html, plain)
+      await copyRichEmail(
+        `<pre style="font-family:Calibri">${plain.replace(/\n/g, '<br/>')}</pre>`,
+        plain,
+      )
       setCopied('desk')
-      setToast('Cost sheet 표 복사됨 — Outlook / Excel에 붙여넣기')
+      setToast('Excel-style cost table copied')
       window.setTimeout(() => {
         setCopied('')
         setToast('')
       }, 2400)
     } catch {
-      setToast('클립보드 복사에 실패했습니다.')
+      setToast('????? ?????????????.')
       window.setTimeout(() => setToast(''), 2200)
     }
   }
 
-  const handlePrintDeskPdf = () => {
-    if (!deskSheet || !selectedDeskQuote) return
-    const cbm =
-      (cargo.length * cargo.width * cargo.height) / 1_000_000
-    printQuotation(
-      buildDeskQuotationHtml({
-        origin,
-        destination,
-        length: cargo.length,
-        width: cargo.width,
-        height: cargo.height,
-        weight: Number(cargo.weight),
-        cw,
-        cbm,
-        carrierCode: selectedDeskQuote.code,
-        carrierName: selectedDeskQuote.name,
-        usdHkd,
-        remark: deskRemark,
-        validUntil: quoteValidUntil,
-        deskSheet,
-      }),
-    )
-    setToast('인쇄 창에서 대상: PDF로 저장')
+  const handlePrintCmDeskPdf = () => {
+    if (!cmDeskQuote) return
+    printCmDeskQuote({
+      origin,
+      destination,
+      cargoSummary: `${cargo.length} x ${cargo.width} x ${cargo.height} cm / 1 pcs / ${Number(cargo.weight).toFixed(1)} kg`,
+      carrierCode: deskCarrier,
+      remark: deskRemark,
+      quote: cmDeskQuote,
+      exceptionDraft: cmExceptionDraft,
+    })
+    setToast('Save as PDF in the print dialog')
     window.setTimeout(() => setToast(''), 2800)
   }
 
@@ -840,7 +667,7 @@ function QuoteWorkspace() {
     <div className="min-h-screen bg-white font-sans text-wac-navy">
       <SiteHeader />
 
-      {/* INSTANT QUOTE — Excel Master backend */}
+      {/* INSTANT QUOTE ??Excel Master backend */}
       <section
         id="quote"
         className="quote-dashboard border-t border-slate-200/80 pt-24 pb-16 sm:pt-28 sm:pb-20"
@@ -859,8 +686,8 @@ function QuoteWorkspace() {
               </h2>
               <p className="mt-2 text-[14px] leading-relaxed text-slate-600">
                 {quoteMode === 'public'
-                  ? 'Indicative air from Excel Master_DB — chargeable weight and carrier compare.'
-                  : 'Master 자동 + 이 건 예외 + 줄 추가. Copy table / Save PDF.'}
+                  ? 'Indicative air from Excel Master_DB ??chargeable weight and carrier compare.'
+                  : 'CM Excel ???????? ??Master ?? + ??? + Other ??TOTAL + PDF.'}
               </p>
             </div>
             <div className="inline-flex rounded-md border border-slate-200/90 bg-white/90 p-1 shadow-sm backdrop-blur-sm">
@@ -890,7 +717,7 @@ function QuoteWorkspace() {
             </div>
           </div>
 
-          {/* KPI strip — Desk dashboard chrome only (Public has its own quote card) */}
+          {/* KPI strip ??Desk dashboard chrome only (Public has its own quote card) */}
           <div
             className={`mb-8 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 sm:grid-cols-4 ${
               quoteMode === 'public' ? 'hidden' : ''
@@ -901,7 +728,7 @@ function QuoteWorkspace() {
                 Route
               </p>
               <p className="mt-0.5 font-display text-lg font-extrabold text-wac-navy">
-                {origin || '—'} → {destination || '—'}
+                {origin || '--'} {'?'} {destination || '--'}
               </p>
             </div>
             <div className="bg-white px-4 py-3">
@@ -909,7 +736,7 @@ function QuoteWorkspace() {
                 Chargeable wt
               </p>
               <p className="mt-0.5 font-display text-lg font-extrabold text-emerald-700">
-                {cw > 0 ? `${cw.toFixed(1)} KGS` : '—'}
+                {cw > 0 ? `${deskCw.toFixed(1)} KGS` : '--'}
               </p>
             </div>
             <div className="bg-white px-4 py-3">
@@ -917,13 +744,13 @@ function QuoteWorkspace() {
                 {quoteMode === 'desk' ? 'Formal total' : 'Best indicative'}
               </p>
               <p className="mt-0.5 font-display text-lg font-extrabold text-wac-navy">
-                {quoteMode === 'desk' && deskSheet && showResult
-                  ? `HKD ${deskSheet.totalHkd.toFixed(0)}`
+                {quoteMode === 'desk' && cmDeskQuote && showResult
+                  ? `${cmDeskQuote.currency} ${cmDeskQuote.total.toFixed(0)}`
                   : showResult && bestPublic
                     ? `USD ${bestPublic.total.toFixed(0)}`
                     : cmQuote
                       ? `USD ${cmQuote.total.toFixed(0)}`
-                      : '—'}
+                      : '--'}
               </p>
             </div>
             <div className="bg-wac-navy px-4 py-3">
@@ -931,13 +758,13 @@ function QuoteWorkspace() {
                 TOTAL APPX
               </p>
               <p className="mt-0.5 font-display text-lg font-extrabold text-wac-orange">
-                {quoteMode === 'desk' && deskSheet && showResult
-                  ? `USD ${deskSheet.totalUsd.toFixed(2)}`
+                {quoteMode === 'desk' && cmDeskQuote && showResult
+                  ? `${cmDeskQuote.currency} ${cmDeskQuote.total.toFixed(2)}`
                   : showResult && bestPublic
                     ? `USD ${bestPublic.total.toFixed(2)}`
                     : cmQuote
                       ? `USD ${cmQuote.total.toFixed(2)}`
-                      : 'Calculate →'}
+                      : 'Calculate'}
               </p>
             </div>
           </div>
@@ -1070,165 +897,58 @@ function QuoteWorkspace() {
                   </div>
 
                   {quoteMode === 'desk' && (
-                    <div className="space-y-4 rounded-lg border border-orange-100 bg-orange-50/60 p-4">
+                    <div className="space-y-3 rounded-lg border border-orange-100 bg-orange-50/60 p-4">
                       <div className="flex items-center gap-2">
                         <Calculator className="h-4 w-4 text-wac-orange" />
                         <p className="text-[11px] font-bold tracking-wider text-wac-orange uppercase">
-                          Variable slots (HKD)
+                          Excel ??? (cargo meta)
                         </p>
                       </div>
                       <p className="text-[11px] leading-relaxed text-slate-500">
-                        Enter only what changes per job — Cartage / Tunnel /
-                        Parking. Local master lines auto-calc from C.W.
+                        Route??? ??? ??Calculate. ?? ??????Other???????                        ?????Excel J????????.
                       </p>
-                      {(
-                        [
-                          ['cartage', 'Cartage / Trucking'],
-                          ['tunnel', 'Tunnel Fee'],
-                          ['parking', 'Parking Fee'],
-                        ] as const
-                      ).map(([key, label]) => (
-                        <div key={key}>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
                           <label className="mb-1 block text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-                            {label}
+                            Qty (pcs)
                           </label>
                           <input
                             type="number"
-                            min={0}
-                            step={1}
-                            value={slots[key]}
+                            min={1}
+                            value={cmQty}
                             onChange={(e) =>
-                              setSlots({
-                                ...slots,
-                                [key]: Number(e.target.value),
-                              })
+                              setCmQty(Math.max(1, Number(e.target.value) || 1))
                             }
-                            className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-wac-orange focus:ring-1 focus:ring-wac-orange"
+                            className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-wac-orange"
                           />
                         </div>
-                      ))}
-
-                      <div className="border-t border-orange-100 pt-3">
-                        <p className="mb-2 text-[10px] font-bold tracking-wider text-wac-navy uppercase">
-                          Master 예외 (이 건만 덮어쓰기)
-                        </p>
-                        <p className="mb-2 text-[11px] leading-relaxed text-slate-500">
-                          비워 두면 Master 자동. Handling 321처럼 계정 예외는 여기.
-                        </p>
-                        {ALWAYS_ON_LOCAL.map((c) => {
-                          const auto = calcLineAmount(c, cw)
-                          return (
-                            <div key={c.id} className="mb-2">
-                              <label className="mb-1 flex items-center justify-between text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-                                <span>{c.label}</span>
-                                <span className="font-semibold normal-case text-slate-400">
-                                  auto {auto.toFixed(2)}
-                                </span>
-                              </label>
-                              <input
-                                type="number"
-                                min={0}
-                                step={0.01}
-                                placeholder={`Auto ${auto.toFixed(2)}`}
-                                value={overrideDraft[c.id] ?? ''}
-                                onChange={(e) => {
-                                  const raw = e.target.value
-                                  setOverrideDraft((d) => ({ ...d, [c.id]: raw }))
-                                  const n = Number(raw)
-                                  setOverrides((o) => {
-                                    const next = { ...o }
-                                    if (raw.trim() === '' || !Number.isFinite(n)) {
-                                      delete next[c.id]
-                                    } else {
-                                      next[c.id] = n
-                                    }
-                                    return next
-                                  })
-                                }}
-                                className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-wac-orange focus:ring-1 focus:ring-wac-orange"
-                              />
-                            </div>
-                          )
-                        })}
-                      </div>
-
-                      <div className="border-t border-orange-100 pt-3">
-                        <div className="mb-2 flex items-center justify-between">
-                          <p className="text-[10px] font-bold tracking-wider text-wac-navy uppercase">
-                            항목 추가 (Other)
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setExtraLines((rows) => [
-                                ...rows,
-                                {
-                                  id: `extra-${Date.now()}`,
-                                  label: '',
-                                  amount: 0,
-                                },
-                              ])
+                        <div>
+                          <label className="mb-1 block text-[10px] font-bold tracking-wider text-slate-400 uppercase">
+                            BL count
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={blCount}
+                            onChange={(e) =>
+                              setBlCount(Math.max(1, Number(e.target.value) || 1))
                             }
-                            className="inline-flex items-center gap-1 text-[10px] font-bold tracking-wide text-wac-orange uppercase hover:underline"
-                          >
-                            <Plus className="h-3.5 w-3.5" />
-                            Add line
-                          </button>
+                            className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-wac-orange"
+                          />
                         </div>
-                        {extraLines.length === 0 && (
-                          <p className="text-[11px] text-slate-400">
-                            RE-PACK, KEEP COOL, Strapping 등 이 건만 있는 줄.
-                          </p>
-                        )}
-                        {extraLines.map((row) => (
-                          <div key={row.id} className="mb-2 flex gap-2">
-                            <input
-                              type="text"
-                              placeholder="Charge name"
-                              value={row.label}
-                              onChange={(e) =>
-                                setExtraLines((rows) =>
-                                  rows.map((r) =>
-                                    r.id === row.id
-                                      ? { ...r, label: e.target.value }
-                                      : r,
-                                  ),
-                                )
-                              }
-                              className="h-10 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-wac-orange"
-                            />
-                            <input
-                              type="number"
-                              min={0}
-                              placeholder="HKD"
-                              value={row.amount || ''}
-                              onChange={(e) =>
-                                setExtraLines((rows) =>
-                                  rows.map((r) =>
-                                    r.id === row.id
-                                      ? { ...r, amount: Number(e.target.value) }
-                                      : r,
-                                  ),
-                                )
-                              }
-                              className="h-10 w-24 rounded-lg border border-slate-200 bg-white px-2 text-sm font-medium outline-none focus:border-wac-orange"
-                            />
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setExtraLines((rows) =>
-                                  rows.filter((r) => r.id !== row.id),
-                                )
-                              }
-                              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-400 hover:border-red-300 hover:text-red-500"
-                              aria-label="Remove line"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        ))}
                       </div>
-
+                      <div>
+                        <label className="mb-1 block text-[10px] font-bold tracking-wider text-slate-400 uppercase">
+                          Carrier
+                        </label>
+                        <input
+                          type="text"
+                          value={deskCarrier}
+                          onChange={(e) => setDeskCarrier(e.target.value.toUpperCase())}
+                          placeholder="KE"
+                          className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold uppercase outline-none focus:border-wac-orange"
+                        />
+                      </div>
                       <div>
                         <label className="mb-1 block text-[10px] font-bold tracking-wider text-slate-400 uppercase">
                           Remark (PDF)
@@ -1237,93 +957,54 @@ function QuoteWorkspace() {
                           type="text"
                           value={deskRemark}
                           onChange={(e) => setDeskRemark(e.target.value)}
-                          placeholder="KEEP COOL / 2–8°C …"
+                          placeholder="KEEP COOL / 2-8?C"
                           className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-wac-orange"
                         />
                       </div>
                       <div>
-                        <div className="mb-1 flex items-center justify-between gap-2">
-                          <label className="block text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-                            FX USD → HKD
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() => void refreshFx()}
-                            disabled={fxLoading}
-                            className="inline-flex items-center gap-1 text-[10px] font-bold tracking-wide text-wac-orange uppercase hover:underline disabled:opacity-50"
-                          >
-                            {fxLoading ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : null}
-                            Refresh
-                          </button>
-                        </div>
+                        <label className="mb-1 block text-[10px] font-bold tracking-wider text-slate-400 uppercase">
+                          Ex. Rate (HKD lanes)
+                        </label>
                         <input
                           type="number"
-                          min={0.1}
+                          min={0.0001}
                           step={0.0001}
-                          value={usdHkd}
-                          onChange={(e) => {
-                            setUsdHkd(Number(e.target.value))
-                            setFxMeta((m) => ({ ...m, source: 'manual' }))
-                          }}
+                          value={cmFxRate}
+                          onChange={(e) => setCmFxRate(Number(e.target.value) || 1)}
                           className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-wac-orange"
                         />
                         <p className="mt-1 text-[10px] text-slate-400">
-                          {fxMeta.source === 'live' && fxMeta.asOf
-                            ? `Live (ECB) · ${fxMeta.asOf}`
-                            : fxMeta.source === 'manual'
-                              ? 'Manual override'
-                              : `Fallback ${DEFAULT_USD_HKD} (API unavailable)`}
+                          Excel C34 ??HKD ???? 1.0, USD??HKD ???????? ???
                         </p>
-                      </div>
-                      <div className="flex flex-wrap gap-3 pt-1">
-                        {(
-                          [
-                            ['xray', 'X-ray'],
-                            ['uld', 'ULD'],
-                            ['dg', 'DG'],
-                            ['whReg', 'WH Reg'],
-                          ] as const
-                        ).map(([key, label]) => (
-                          <label
-                            key={key}
-                            className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] font-semibold text-slate-600"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={deskFlags[key]}
-                              onChange={(e) =>
-                                setDeskFlags({
-                                  ...deskFlags,
-                                  [key]: e.target.checked,
-                                })
-                              }
-                              className="rounded border-slate-300 text-wac-orange focus:ring-wac-orange"
-                            />
-                            {label}
-                          </label>
-                        ))}
                       </div>
                     </div>
                   )}
 
-                  {quoteMode === 'desk' && (
-                    <details className="group rounded-lg border border-slate-200 bg-slate-50/80">
-                      <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-[11px] font-bold tracking-wider text-wac-navy uppercase">
-                        <FileSpreadsheet className="h-4 w-4" />
-                        CM Excel Master
-                        <span className="ml-auto font-semibold text-slate-400 normal-case">
-                          {cmMaster
-                            ? `${cmMaster.air.length} routes`
-                            : 'optional'}
-                        </span>
+                  {quoteMode === 'desk' && cmMaster && (
+                    <details className="rounded-lg border border-slate-200 bg-white" open>
+                      <summary className="cursor-pointer list-none px-4 py-3 text-[11px] font-bold tracking-wider text-wac-navy uppercase">
+                        Master_DB ??? (??????? ???)
                       </summary>
-                      <div className="space-y-3 border-t border-slate-200 px-4 py-3">
-                      <p className="text-[11px] leading-relaxed text-slate-500">
-                        Same Master_DB as the CM workbook. Portfolio link —
-                        company deliverable remains Excel.
-                      </p>
+                      <div className="border-t border-slate-100 px-4 pb-4 pt-2">
+                        <CmMasterEditor
+                          master={cmMaster}
+                          onChange={(next) => {
+                            setCmMaster(next)
+                            setCmImportMsg('Master edited in browser (session)')
+                          }}
+                        />
+                      </div>
+                    </details>
+                  )}
+
+                  {quoteMode === 'desk' && (
+                    <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-4">
+                      <div className="mb-2 flex items-center gap-2">
+                        <FileSpreadsheet className="h-4 w-4 text-wac-navy" />
+                        <p className="text-[11px] font-bold tracking-wider text-wac-navy uppercase">
+                          xlsx Import / Download
+                        </p>
+                      </div>
                       <div className="flex flex-wrap gap-2">
                         <a
                           href="/excel/WAC_Air_Quotation_Simulator.xlsx"
@@ -1353,7 +1034,7 @@ function QuoteWorkspace() {
                                 const master = await parseCmMasterFile(file)
                                 setCmMaster(master)
                                 setCmImportMsg(
-                                  `Loaded ${master.air.length} routes · ${master.local.length} local lines`,
+                                  `Loaded ${master.air.length} routes ? ${master.local.length} local lines`,
                                 )
                                 setToast('CM Excel Master imported')
                               } catch (err) {
@@ -1367,43 +1048,16 @@ function QuoteWorkspace() {
                           }}
                         />
                       </div>
-                      <div className="flex items-center gap-3">
-                        <label className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-                          Qty (pcs)
-                        </label>
-                        <input
-                          type="number"
-                          min={1}
-                          value={cmQty}
-                          onChange={(e) =>
-                            setCmQty(Math.max(1, Number(e.target.value) || 1))
-                          }
-                          className="h-9 w-20 rounded-lg border border-slate-200 bg-white px-2 text-sm font-medium outline-none focus:border-wac-orange"
-                        />
-                      </div>
                       {cmImportMsg && (
-                        <p className="text-[11px] text-slate-600">{cmImportMsg}</p>
+                        <p className="mt-2 text-[11px] text-slate-600">{cmImportMsg}</p>
                       )}
-                      {cmMaster && !cmQuote && (
-                        <p className="text-[11px] text-amber-700">
-                          No Master rate for {origin}-{destination}. Try ICN-HKG,
-                          ICN-SIN, ICN-NRT, …
+                      {cmMaster && (
+                        <p className="mt-2 text-[11px] font-semibold text-wac-navy">
+                          {cmMaster.air.length} routes ? {cmMaster.local.length} local
+                          charges
                         </p>
                       )}
-                      {cmQuote && (
-                        <p className="text-[12px] font-semibold text-wac-navy">
-                          Excel-linked APPX:{' '}
-                          <span className="text-wac-orange">
-                            USD {cmQuote.total.toFixed(2)}
-                          </span>
-                          <span className="ml-2 font-normal text-slate-500">
-                            ({cmQuote.route} · {cmQuote.breakLabel} · C.W.{' '}
-                            {cmQuote.cw.toFixed(1)} kg)
-                          </span>
-                        </p>
-                      )}
-                      </div>
-                    </details>
+                    </div>
                   )}
 
                   {formError && (
@@ -1447,8 +1101,8 @@ function QuoteWorkspace() {
                   </h4>
                   <p className="max-w-sm text-center text-sm text-slate-500">
                     {quoteMode === 'desk'
-                      ? 'Air + EXP local master + variable truck slots'
-                      : `Querying WAC major airlines for ${origin} → ${destination} (mock rates until CargoAI / rate DB).`}
+                      ? 'Reading Master_DB ??Air + local + Other rows'
+                      : `Querying WAC major airlines for ${origin} ??${destination} (mock rates until CargoAI / rate DB).`}
                   </p>
                 </div>
               ) : !showResult ? (
@@ -1464,199 +1118,60 @@ function QuoteWorkspace() {
                     12 WAC major carriers instantly.
                   </p>
                 </div>
-              ) : quoteMode === 'desk' && deskSheet && selectedDeskQuote ? (
-                <div className="space-y-4">
-                  {cmQuote && (
-                    <div className="rounded-xl border border-wac-navy/15 bg-white p-5 shadow-sm">
-                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <FileSpreadsheet className="h-4 w-4 text-wac-navy" />
-                          <h3 className="text-sm font-bold text-wac-navy">
-                            CM Excel Master estimate (USD)
-                          </h3>
-                        </div>
-                        <span className="text-[11px] font-semibold text-slate-400">
-                          Same logic as Quote sheet · dummy master
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 text-[12px] sm:grid-cols-4">
-                        {(
-                          [
-                            ['Air Freight', cmQuote.airFreight],
-                            ['FSC', cmQuote.fsc],
-                            ['SSC', cmQuote.ssc],
-                            ['Handling', cmQuote.handling],
-                            ['Doc', cmQuote.doc],
-                            ['Trucking', cmQuote.trucking],
-                          ] as const
-                        ).map(([label, amt]) => (
-                          <div
-                            key={label}
-                            className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2"
-                          >
-                            <p className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-                              {label}
-                            </p>
-                            <p className="font-semibold text-slate-700">
-                              ${amt.toFixed(2)}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                      <p className="mt-3 text-right text-lg font-extrabold text-wac-navy">
-                        TOTAL APPX. ${cmQuote.total.toFixed(2)}
-                      </p>
-                    </div>
-                  )}
-                  <div className="rounded-xl border border-orange-200 bg-orange-50 p-5">
-                    <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-                        <p className="mb-1 text-[11px] font-bold tracking-wider text-wac-orange">
-                          FORMAL ORIGIN COST
-                        </p>
-                        <p className="font-display text-2xl font-black text-wac-navy">
-                          HKD {deskSheet.totalHkd.toFixed(2)}
-                        </p>
-                        <p className="mt-1 text-sm font-semibold text-slate-600">
-                          ≈ USD {deskSheet.totalUsd.toFixed(2)} · C.W.{' '}
-                          {cw.toFixed(1)} KGS · {origin} → {destination}
-                        </p>
-                      </div>
-                      <div className="text-right text-[11px] text-slate-500">
-                        <p>
-                          Master {MASTER_VALIDITY.effective} →{' '}
-                          {MASTER_VALIDITY.expiry}
-                        </p>
-                        <p className="mt-1">FX {usdHkd.toFixed(4)}</p>
-                      </div>
-                    </div>
-                    <div className="mt-4 grid grid-cols-3 gap-3">
-                      <div className="rounded-lg bg-white/80 px-3 py-2">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase">
-                          Air
-                        </p>
-                        <p className="text-sm font-bold text-wac-navy">
-                          HKD {deskSheet.airHkd.toFixed(2)}
-                        </p>
-                      </div>
-                      <div className="rounded-lg bg-white/80 px-3 py-2">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase">
-                          Local master
-                        </p>
-                        <p className="text-sm font-bold text-wac-navy">
-                          HKD {deskSheet.localHkd.toFixed(2)}
-                        </p>
-                      </div>
-                      <div className="rounded-lg bg-white/80 px-3 py-2">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase">
-                          Variable slots
-                        </p>
-                        <p className="text-sm font-bold text-wac-orange">
-                          HKD {deskSheet.variableHkd.toFixed(2)}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <label className="mb-1.5 block text-[11px] font-bold tracking-wider text-slate-400 uppercase">
-                          Air carrier (for this sheet)
-                        </label>
-                        <select
-                          value={selectedDeskQuote.code}
-                          onChange={(e) => setDeskCarrier(e.target.value)}
-                          className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-wac-navy outline-none focus:border-wac-orange"
-                        >
-                          {quotes.map((q) => (
-                            <option key={q.code} value={q.code}>
-                              {q.code} — {q.name} · USD {q.total.toFixed(2)}
-                            </option>
-                          ))}
-                        </select>
-        </div>
-        <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-                        onClick={handleCopyDeskSheet}
-                        className="inline-flex items-center gap-2 rounded-lg border-2 border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 transition hover:border-wac-orange hover:text-wac-orange"
-                      >
-                        {copied === 'desk' ? (
-                          <CheckCircle2 className="h-4 w-4 text-green-600" />
-                        ) : (
-                          <Copy className="h-4 w-4" />
-                        )}
-                        {copied === 'desk' ? 'Copied!' : 'Copy table'}
-        </button>
-        <button
-          type="button"
-                        onClick={handlePrintDeskPdf}
-                        className="inline-flex items-center gap-2 rounded-lg bg-wac-navy px-3.5 py-2 text-xs font-bold text-white transition hover:bg-[#243447]"
-                      >
-                        <Printer className="h-4 w-4" />
-                        Save PDF
-        </button>
-        </div>
-        </div>
-
-                    <div className="overflow-hidden rounded-lg border border-slate-100">
-                      <table className="w-full text-left text-[13px]">
-                        <thead>
-                          <tr className="bg-slate-50 text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-                            <th className="px-3 py-2.5">Charge</th>
-                            <th className="px-3 py-2.5">Group</th>
-                            <th className="px-3 py-2.5 text-right">Amount</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {deskSheet.lines.map((l) => (
-                            <tr
-                              key={l.id}
-                              className="border-t border-slate-100"
-                            >
-                              <td className="px-3 py-2.5 font-semibold text-wac-navy">
-                                {l.label}
-                                {l.note && (
-                                  <span className="mt-0.5 block text-[10px] font-medium text-slate-400">
-                                    {l.note}
-                                  </span>
-                                )}
-                              </td>
-                              <td className="px-3 py-2.5">
-                                <span
-                                  className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
-                                    l.group === 'variable'
-                                      ? 'bg-orange-50 text-wac-orange'
-                                      : l.group === 'air'
-                                        ? 'bg-blue-50 text-blue-700'
-                                        : 'bg-slate-100 text-slate-600'
-                                  }`}
-                                >
-                                  {l.group}
-                                </span>
-                              </td>
-                              <td className="px-3 py-2.5 text-right font-bold text-slate-800">
-                                {l.currency} {l.amount.toFixed(2)}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    <p className="mt-3 text-[10px] text-slate-400">
-                      * Exception fills override Master for this job. Add line = Excel Other. Save PDF → print dialog → PDF로 저장.
-                    </p>
-                  </div>
-                </div>
+              ) : showResult ? (
+                <CmDeskQuotePanel
+                  master={cmMaster}
+                  quote={cmDeskQuote}
+                  origin={origin}
+                  destination={destination}
+                  exceptionDraft={cmExceptionDraft}
+                  otherLabels={cmOtherLabels}
+                  otherUnits={cmOtherUnits}
+                  extraOthers={cmExtraOthers}
+                  onExceptionChange={(id, value) =>
+                    setCmExceptionDraft((d) => ({ ...d, [id]: value }))
+                  }
+                  onOtherLabelChange={(id, value) =>
+                    setCmOtherLabels((l) => ({ ...l, [id]: value }))
+                  }
+                  onOtherUnitChange={(id, value) =>
+                    setCmOtherUnits((u) => ({ ...u, [id]: value }))
+                  }
+                  onAddExtraOther={() =>
+                    setCmExtraOthers((rows) => [
+                      ...rows,
+                      {
+                        id: `extra-${Date.now()}`,
+                        label: 'Other',
+                        unit: 'Manual',
+                      },
+                    ])
+                  }
+                  onRemoveExtraOther={(id) => {
+                    setCmExtraOthers((rows) => rows.filter((r) => r.id !== id))
+                    setCmExceptionDraft((d) => {
+                      const next = { ...d }
+                      delete next[id]
+                      return next
+                    })
+                  }}
+                  onExtraOtherChange={(id, patch) =>
+                    setCmExtraOthers((rows) =>
+                      rows.map((r) => (r.id === id ? { ...r, ...patch } : r)),
+                    )
+                  }
+                  onCopy={() => void handleCopyCmDesk()}
+                  onPrint={handlePrintCmDeskPdf}
+                  copied={copied === 'desk'}
+                />
               ) : (
                 <div className="flex h-full min-h-[420px] flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white/70 p-12">
                   <Plane className="mb-4 h-8 w-8 text-slate-300" />
                   <h4 className="mb-1 text-lg font-bold text-slate-700">
-                    Ready for origin cost
+                    Ready for Excel desk quote
                   </h4>
                   <p className="max-w-sm text-center text-sm text-slate-500">
-                    Enter cargo details and variable slots, then calculate.
+                    Enter route and cargo, then Calculate.
                   </p>
                 </div>
               )}
@@ -1683,6 +1198,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/quote" element={<QuoteWorkspace />} />
+      <Route path="/origin-cost-desk" element={<OriginCostDeskSite />} />
       <Route path="/track" element={<TrackPage />} />
       <Route path="/desk" element={<Navigate to="/quote?mode=desk" replace />} />
     </Routes>

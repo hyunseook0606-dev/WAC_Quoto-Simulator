@@ -15,6 +15,7 @@ export type CmAirRate = {
   r1000: number
   fsc: number
   ssc: number
+  currency: 'USD' | 'HKD'
 }
 
 export type CmLocalRate = {
@@ -90,6 +91,14 @@ export function parseCmMasterFromWorkbook(
       const route = String(cell(rows, r, 0) ?? '').trim()
       if (!route || route.startsWith('2.') || route.includes('Local')) break
       if (!route.includes('-')) break
+      const curRaw = String(cell(rows, r, 9) ?? '').trim().toUpperCase()
+      const origin = route.split('-')[0]?.toUpperCase() ?? ''
+      const currency: 'USD' | 'HKD' =
+        curRaw === 'USD' || curRaw === 'HKD'
+          ? curRaw
+          : origin === 'HKG'
+            ? 'HKD'
+            : 'USD'
       air.push({
         route,
         min: num(cell(rows, r, 1)),
@@ -100,6 +109,7 @@ export function parseCmMasterFromWorkbook(
         r1000: num(cell(rows, r, 6)),
         fsc: num(cell(rows, r, 7)),
         ssc: num(cell(rows, r, 8)),
+        currency,
       })
     }
   }
