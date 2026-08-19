@@ -54,15 +54,17 @@ React 19 · TypeScript · Vite · Tailwind CSS v4 · Lucide · Vercel
 
 ```
 src/
-  App.tsx          # Landing + Quote / Desk UI
-  Hero.tsx
-  originCost.ts    # EXP local master + variable-slot engine
-  fx.ts            # USD→HKD (Frankfurter + fallback 7.8)
+  App.tsx              # Quote / Desk UI + routes
+  pages/HomePage.tsx   # Landing
+  pages/TrackPage.tsx  # AWB demo (not live airline API)
+  originCost.ts        # EXP local master + variable-slot engine
+  quoteDocument.ts     # Desk PDF / print HTML
+  fx.ts                # USD→HKD (Frankfurter + fallback 7.8)
 docs/
-  검증-메트릭.md   # Portfolio metrics (start here)
+  검증-메트릭.md
   주간보고-Public-vs-Desk.md
   변동비-고정비-UI방향.md
-  보고서-캡처/     # Screen pack + captions
+  보고서-캡처/
 ```
 
 ---

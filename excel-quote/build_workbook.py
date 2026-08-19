@@ -1,25 +1,68 @@
 # -*- coding: utf-8 -*-
-"""Build WAC Air Quotation Simulator (.xlsx) — clean one-page UI."""
+"""
+WAC Air Quotation Simulator — template-patch builder
 
+Project essence:
+  Generic desk air-quotation tool (CM email UI).
+  Master_DB = nearly-fixed rates.
+  입력 = cargo + auto calc + 참고(Master) / 예외(manual).
+  견적서 = 100% refs to 입력.
+  Special cases (KEEP COOL / chocolate etc.) = fill 예외 + Other, NOT rewrite layout.
+
+Approach:
+  Copy clean baseline WAC_Air_Quotation_Simulator (2).xlsx
+  then patch only Master / formulas / extra charge rows / FX / Guide.
+"""
+
+from __future__ import annotations
+
+from copy import copy
 from pathlib import Path
 
-from openpyxl import Workbook
+from openpyxl import load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side, Protection
+from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
-OUT = Path(__file__).resolve().parent / "WAC_Air_Quotation_Simulator.xlsx"
+ROOT = Path(__file__).resolve().parent
+BASELINE = ROOT / "WAC_Air_Quotation_Simulator (2).xlsx"
+OUT = ROOT / "WAC_Air_Quotation_Simulator.xlsx"
+OUT_ALT = ROOT / "WAC_Air_Quotation_Simulator_v2.xlsx"
 
 NAVY = "1A2A3A"
 ORANGE = "F05023"
-LIGHT = "F8FAFC"
-INPUT_BG = "FFF7ED"
-YELLOW = "FEF3C7"
-GREEN_BG = "DCFCE7"
+SLATE = "334155"
+YELLOW = "FFF3D6"
+GREEN_BG = "E8F5E9"
 GREEN = "166534"
 MUTED = "64748B"
 LINE = "E2E8F0"
 WHITE = "FFFFFF"
-SLATE = "334155"
+LIGHT = "F5F7F9"
+INPUT_BG = "FFF7F2"
+
+# Air table: A ROUTE … I SSC/kg | J CUR (USD/HKD)
+AIR_RNG = "Master_DB!$A$16:$J$50"
+CUR_COL = 10  # VLOOKUP col index for CUR
+LOCAL_A = "Master_DB!$A$21:$A$40"
+LOCAL_B = "Master_DB!$B$21:$B$40"
+LOCAL_C = "Master_DB!$C$21:$C$40"
+LOCAL_D = "Master_DB!$D$21:$D$40"
+
+# Charge rows on 입력 after patch
+# 18 Air, 19 FSC, 20 SSC, 21 Handling, 22 Doc, 23 Trucking
+# 24 Terminal, 25-30 Other1-6, 31 TOTAL
+CH_FIRST = 18
+CH_LAST = 30
+TOT_ROW = 31
+TOT_AMT = "I31"
+CUR_CELL = "C33"
+FX_CELL = "C34"
+# Quote meta (입력 footer → 견적서)
+CARRIER_CELL = "C37"
+REMARK_CELL = "C38"
+VALID_CELL = "C39"
+META_TIP_ROW = 41
 
 thin = Border(
     left=Side(style="thin", color=LINE),
@@ -34,7 +77,7 @@ def fill(c: str) -> PatternFill:
 
 
 def fnt(bold=False, size=11, color=NAVY):
-    return Font(name="Calibri", bold=bold, size=size, color=color)
+    return Font(name="Malgun Gothic", bold=bold, size=size, color=color)
 
 
 def unlock(cell):
@@ -45,117 +88,83 @@ def lock(cell):
     cell.protection = Protection(locked=True)
 
 
-def set_widths(ws, d):
-    for k, v in d.items():
-        ws.column_dimensions[k].width = v
+def copy_row_style(ws, src_row: int, dst_row: int, max_col: int = 10):
+    for c in range(1, max_col + 1):
+        s = ws.cell(src_row, c)
+        d = ws.cell(dst_row, c)
+        if s.has_style:
+            d.font = copy(s.font)
+            d.fill = copy(s.fill)
+            d.border = copy(s.border)
+            d.alignment = copy(s.alignment)
+            d.number_format = s.number_format
+            d.protection = copy(s.protection)
 
 
-def paint_merge(ws, cell_range, bg):
-    for row in ws[cell_range]:
-        for cell in row:
-            cell.fill = fill(bg)
+def unprotect(ws):
+    try:
+        ws.protection.sheet = False
+    except Exception:
+        pass
+
+
+def protect(ws):
+    ws.protection.sheet = True
+    ws.protection.enable()
+
+
+def patch_master(ws):
+    """Insert -45 column, seed HKG-ICN, expand local items with short notes."""
+    unprotect(ws)
+
+    # Insert -45 between MIN and +45 (new column C)
+    if ws.cell(15, 3).value != "-45":
+        ws.insert_cols(3)
+        ws.cell(15, 3, "-45")
+        for c in range(1, 10):
+            cell = ws.cell(15, c)
+            cell.fill = fill(NAVY)
+            cell.font = fnt(bold=True, size=10, color=WHITE)
+            cell.alignment = Alignment(horizontal="center")
             cell.border = thin
             lock(cell)
 
+        # Shifted seed values: old +45.. become cols 4..7, FSC/SSC 8/9
+        # Fill -45 for existing routes (slightly above +45 as under-45 premium)
+        for r in range(16, 28):
+            route = ws.cell(r, 1).value
+            if not route or not isinstance(route, str) or "-" not in route:
+                continue
+            plus45 = ws.cell(r, 4).value
+            under = None
+            if isinstance(plus45, (int, float)):
+                under = round(float(plus45) + 1.0, 2)
+            ws.cell(r, 3, under)
+            for c in range(2, 10):
+                cell = ws.cell(r, c)
+                cell.fill = fill(YELLOW)
+                cell.number_format = "0.00"
+                cell.border = thin
+                cell.alignment = Alignment(horizontal="center")
+                unlock(cell)
+            ws.cell(r, 1).fill = fill(INPUT_BG)
+            ws.cell(r, 1).font = fnt(bold=True)
+            unlock(ws.cell(r, 1))
 
-def header_bar(ws, cell_range, text, bg=NAVY):
-    top = cell_range.split(":")[0]
-    ws[top] = text
-    ws[top].font = fnt(bold=True, size=11, color=WHITE)
-    ws[top].alignment = Alignment(horizontal="left", vertical="center", indent=1)
-    ws.merge_cells(cell_range)
-    paint_merge(ws, cell_range, bg)
-
-
-def label_cell(cell, text):
-    cell.value = text
-    cell.font = fnt(bold=True, size=10, color=MUTED)
-    cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
-    cell.border = thin
-    cell.fill = fill(WHITE)
-    lock(cell)
-
-
-def input_cell(cell, value=None, fmt=None):
-    if value is not None:
-        cell.value = value
-    cell.fill = fill(INPUT_BG)
-    cell.border = thin
-    cell.font = fnt(bold=True, size=12)
-    cell.alignment = Alignment(horizontal="center", vertical="center")
-    if fmt:
-        cell.number_format = fmt
-    unlock(cell)
-
-
-def value_cell(cell, formula, fmt=None, emphasize=False):
-    cell.value = formula
-    cell.fill = fill(GREEN_BG if emphasize else LIGHT)
-    cell.border = thin
-    cell.font = fnt(bold=emphasize, size=12 if emphasize else 11, color=GREEN if emphasize else NAVY)
-    cell.alignment = Alignment(horizontal="center", vertical="center")
-    if fmt:
-        cell.number_format = fmt
-    lock(cell)
-
-
-def build_master(ws):
-    ws.sheet_view.showGridLines = False
-    set_widths(ws, {c: w for c, w in zip("ABCDEFGH", [22, 12, 12, 12, 12, 12, 12, 14])})
-
-    ws["A1"] = "Master_DB  (Backend)"
-    ws["A1"].font = fnt(bold=True, size=16)
-    ws.merge_cells("A1:H1")
-    ws["A2"] = "노란 칸만 수정 · Quote 단가는 전부 이 시트 참조 (하드코딩 금지)"
-    ws["A2"].font = fnt(size=10, color=MUTED)
-    ws.merge_cells("A2:H2")
-
-    header_bar(ws, "A4:B4", "PARAMETERS")
-    for r, name, val, note in (
-        (5, "Vol factor (kg/CBM)", 167, "CBM x 167 = 부피중량"),
-        (6, "CBM divisor (cm)", 1_000_000, "L x W x H x Qty / 1,000,000"),
-    ):
-        label_cell(ws[f"A{r}"], name)
-        input_cell(ws[f"B{r}"], val, "0")
-        ws[f"B{r}"].fill = fill(YELLOW)
-        ws[f"C{r}"] = note
-        ws[f"C{r}"].font = fnt(size=9, color=MUTED)
-        lock(ws[f"C{r}"])
-
-    header_bar(ws, "A8:B8", "WEIGHT BREAK (kg)")
-    for i, (name, val) in enumerate(
-        [("WB_45", 45), ("WB_100", 100), ("WB_500", 500), ("WB_1000", 1000)]
-    ):
-        r = 9 + i
-        label_cell(ws[f"A{r}"], name)
-        input_cell(ws[f"B{r}"], val, "0")
-        ws[f"B{r}"].fill = fill(YELLOW)
-
-    ws["A14"] = "1. Air freight & surcharge"
-    ws["A14"].font = fnt(bold=True, size=12, color=ORANGE)
-    ws.merge_cells("A14:H14")
-
-    for c, h in enumerate(
-        ["ROUTE", "MIN", "+45", "+100", "+500", "+1000", "FSC/kg", "SSC/kg"], 1
-    ):
-        cell = ws.cell(15, c, h)
-        cell.fill = fill(NAVY)
-        cell.font = fnt(bold=True, size=10, color=WHITE)
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.border = thin
-        lock(cell)
-
-    for i, row in enumerate(
-        [
-            ("ICN-HKG", 50, 4.5, 3.8, 3.2, 2.8, 0.6, 0.15),
-            ("ICN-LAX", 90, 8.5, 7.2, 6.5, 5.8, 1.2, 0.25),
-        ]
-    ):
-        r = 16 + i
-        for c, v in enumerate(row, 1):
+    # Ensure HKG-ICN row exists (sample lane for special-case testing; not chocolate-locked)
+    routes = []
+    for r in range(16, 28):
+        v = ws.cell(r, 1).value
+        if isinstance(v, str) and "-" in v:
+            routes.append(v)
+    if "HKG-ICN" not in routes:
+        r = 16 + len(routes)
+        # MIN, -45, +45, +100, +500, +1000, FSC, SSC  (case memo sample)
+        vals = ("HKG-ICN", 650, 50, 30, 25, 30, 30, 2.1, 2.0)
+        for c, v in enumerate(vals, 1):
             cell = ws.cell(r, c, v)
             cell.border = thin
-            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.alignment = Alignment(horizontal="center")
             if c == 1:
                 cell.font = fnt(bold=True)
                 cell.fill = fill(INPUT_BG)
@@ -163,382 +172,839 @@ def build_master(ws):
                 cell.number_format = "0.00"
                 cell.fill = fill(YELLOW)
             unlock(cell)
+        routes.append("HKG-ICN")
 
-    ws["A19"] = "2. Local charges"
-    ws["A19"].font = fnt(bold=True, size=12, color=ORANGE)
+    # Per-route currency (col J) — display only; rates stay in that currency's units
+    _ensure_route_currency(ws)
 
-    for c, h in enumerate(["Charge Item", "Unit", "Rate", "MIN", "Note"], 1):
-        cell = ws.cell(20, c, h)
+    # Widen Note column slightly; keep notes SHORT
+    ws.column_dimensions["E"].width = 18
+    ws.column_dimensions["A"].width = 28
+    ws.column_dimensions["J"].width = 8
+
+    # Local charges — continuous rows, no mid-table comment overlay
+    # insert_cols(-45) shifts whole sheet: rewrite local header so Rate/MIN stay C/D
+    local_hdr = ("Charge Item", "Unit", "Rate", "MIN", "Note")
+    for c, v in enumerate(local_hdr, 1):
+        cell = ws.cell(20, c, v)
         cell.fill = fill(NAVY)
         cell.font = fnt(bold=True, size=10, color=WHITE)
         cell.alignment = Alignment(horizontal="center")
         cell.border = thin
         lock(cell)
+    # Clear stray cells from column insert in header row
+    for c in range(6, 10):
+        ws.cell(20, c).value = None
+        ws.cell(20, c).fill = PatternFill()
+        ws.cell(20, c).border = Border()
 
-    for i, row in enumerate(
-        [
-            ("Handling Fee", "Per Shipment", 30, 30, "건당"),
-            ("Doc Fee", "Per BL", 25, 25, "BL당"),
-            ("Trucking", "Per CBM", 15, 80, "부피, MIN"),
-        ]
-    ):
+    locals_ = [
+        ("Handling Fee", "Per Shipment", 30, 30, "건별"),
+        ("Doc Fee", "Per BL", 25, 25, "BL당"),
+        ("Trucking", "Per CBM", 15, 80, "CBM, MIN"),
+        ("Terminal Charge", "Per KG", 1.68, 60, "C.W. kg, MIN"),
+        ("CFS", "Per KG", 0.70, 200, "C.W. kg, MIN"),
+        ("Pickup (temp)", "Per Shipment", 0, 2000, "MIN/shpt"),
+        ("Export declaration", "Per Entry", 200, 213, "MIN/entry"),
+        ("RE-PACKING", "Per PLT", 300, 300, "Per PLT"),
+        ("XRAY", "Per KG", 1.0, 0, "Per KG"),
+        ("Gate / parking / toll", "Manual", 0, 0, "At cost"),
+    ]
+    # Clear old local area first (21-40)
+    for r in range(21, 41):
+        for c in range(1, 6):
+            ws.cell(r, c).value = None
+            ws.cell(r, c).fill = PatternFill()
+            ws.cell(r, c).border = Border()
+
+    for i, row in enumerate(locals_):
         r = 21 + i
         for c, v in enumerate(row, 1):
             cell = ws.cell(r, c, v)
             cell.border = thin
-            cell.alignment = Alignment(horizontal="center")
-            if c in (3, 4):
-                cell.number_format = "0.00"
-                cell.fill = fill(YELLOW)
-            else:
-                cell.fill = fill(LIGHT)
+            cell.fill = fill(YELLOW)
+            cell.alignment = Alignment(
+                horizontal="left" if c in (1, 5) else "center",
+                vertical="center",
+            )
             unlock(cell)
+            if c in (3, 4) and isinstance(v, (int, float)):
+                cell.number_format = "0.00"
+        ws.row_dimensions[r].height = 20
 
-    ws["A25"] = "행 16-17 / 21-23 삭제 금지 (Quote lookup 범위)"
-    ws["A25"].font = fnt(size=9, color=MUTED)
-    ws.freeze_panes = "A4"
+    tip_r = 21 + len(locals_) + 1
+    # Unmerge tip area if a previous build left merges
+    for rng in list(ws.merged_cells.ranges):
+        if rng.min_row == tip_r:
+            try:
+                ws.unmerge_cells(str(rng))
+            except Exception:
+                pass
+    ws.merge_cells(start_row=tip_r, start_column=1, end_row=tip_r, end_column=8)
+    tip_cell = ws.cell(
+        tip_r,
+        1,
+        "A16~ ROUTE | J열 CUR=USD/HKD | -45 / +45… | Trucking=CBM · Terminal/CFS/XRAY=C.W.",
+    )
+    tip_cell.font = fnt(size=9, color=MUTED)
+    tip_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    ws.row_dimensions[tip_r].height = 22
+    lock(tip_cell)
+    return routes
 
 
-def build_quote(ws):
-    ws.sheet_view.showGridLines = False
-    set_widths(
+def _ensure_route_currency(ws):
+    """Add Master col J = CUR (USD/HKD) per route. No insert_cols — append only."""
+    hdr = ws.cell(15, CUR_COL, "CUR")
+    hdr.fill = fill(NAVY)
+    hdr.font = fnt(bold=True, size=10, color=WHITE)
+    hdr.alignment = Alignment(horizontal="center", vertical="center")
+    hdr.border = thin
+    lock(hdr)
+
+    # Default: ICN* → USD, HKG* → HKD (desk can edit yellow)
+    for r in range(16, 28):
+        route = ws.cell(r, 1).value
+        if not isinstance(route, str) or "-" not in route:
+            continue
+        # Fill missing -45 if blank (legacy rows)
+        if ws.cell(r, 3).value is None and isinstance(ws.cell(r, 4).value, (int, float)):
+            ws.cell(r, 3, round(float(ws.cell(r, 4).value) + 1.0, 2))
+            ws.cell(r, 3).fill = fill(YELLOW)
+            ws.cell(r, 3).number_format = "0.00"
+            ws.cell(r, 3).border = thin
+            unlock(ws.cell(r, 3))
+
+        cur = ws.cell(r, CUR_COL).value
+        if cur not in ("USD", "HKD"):
+            origin = route.split("-")[0].upper()
+            cur = "HKD" if origin == "HKG" else "USD"
+        cell = ws.cell(r, CUR_COL, cur)
+        cell.fill = fill(YELLOW)
+        cell.font = fnt(bold=True, size=10)
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = thin
+        unlock(cell)
+
+
+def _footer_meta_row(ws, row, label, value, wide=False):
+    """One yellow input row in footer: label B, value C:D (or C:J if wide)."""
+    lab = ws.cell(row, 2, label)
+    lab.font = fnt(bold=True, size=10)
+    lab.fill = fill(LIGHT)
+    lab.border = thin
+    lab.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    lock(lab)
+
+    for rng in list(ws.merged_cells.ranges):
+        if rng.min_row == row and rng.min_col >= 3:
+            try:
+                ws.unmerge_cells(str(rng))
+            except Exception:
+                pass
+
+    end_col = 10 if wide else 4
+    ws.merge_cells(start_row=row, start_column=3, end_row=row, end_column=end_col)
+    cell = ws.cell(row, 3, value)
+    cell.fill = fill(YELLOW)
+    cell.font = fnt(bold=True, size=10)
+    cell.border = thin
+    cell.alignment = Alignment(
+        horizontal="left" if wide else "center",
+        vertical="center",
+        wrap_text=wide,
+        indent=1 if wide else 0,
+    )
+    unlock(cell)
+    for c in range(4, end_col + 1):
+        ws.cell(row, c).border = thin
+        ws.cell(row, c).fill = fill(YELLOW)
+        unlock(ws.cell(row, c))
+    ws.row_dimensions[row].height = 28 if wide else 20
+
+
+def _write_input_quote_meta(ws, tip_after_meta=True, defaults=None):
+    """Carrier / Remark / Valid until under Currency footer."""
+    defaults = defaults or {}
+    for r in (38, META_TIP_ROW):
+        for rng in list(ws.merged_cells.ranges):
+            if rng.min_row == r:
+                try:
+                    ws.unmerge_cells(str(rng))
+                except Exception:
+                    pass
+
+    _footer_meta_row(ws, 37, "Carrier", defaults.get("carrier", "KE"))
+    _footer_meta_row(
         ws,
-        {
-            "A": 2,
-            "B": 18,
-            "C": 14,
-            "D": 2,
-            "E": 18,
-            "F": 14,
-            "G": 2,
-            "H": 14,
-            "I": 14,
-        },
+        38,
+        "Remark",
+        defaults.get(
+            "remark",
+            "KEEP COOL / Maintained at 2-8°C at airline terminal",
+        ),
+        wide=True,
     )
-    for r in range(1, 30):
-        ws.row_dimensions[r].height = 22
-    ws.row_dimensions[2].height = 30
-    ws.row_dimensions[6].height = 34
-    ws.row_dimensions[7].height = 34
-    ws.row_dimensions[8].height = 34
+    _footer_meta_row(ws, 39, "Valid until", defaults.get("valid", ""))
 
-    ws["B2"] = "항공 가견적 시뮬레이터"
-    ws["B2"].font = fnt(bold=True, size=18)
-    ws.merge_cells("B2:I2")
-    lock(ws["B2"])
+    if tip_after_meta:
+        tip = META_TIP_ROW
+        ws.merge_cells(start_row=tip, start_column=2, end_row=tip, end_column=10)
+        tip_cell = ws.cell(
+            tip,
+            2,
+            "Currency=Master CUR(J) | HKD·이미HKD→Ex.Rate=1 | Carrier·Remark·Valid→견적서",
+        )
+        tip_cell.font = fnt(size=9, color=MUTED)
+        tip_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        ws.row_dimensions[tip].height = 22
+        lock(tip_cell)
 
-    ws["B3"] = "주황 칸만 입력 · 단가는 Master_DB 자동 조회 · 가견적(APPX), 최종 INV 아님"
-    ws["B3"].font = fnt(size=9, color=MUTED)
-    ws.merge_cells("B3:I3")
-    lock(ws["B3"])
 
-    # 1. Input
-    header_bar(ws, "B5:C5", "1. 화물 입력", ORANGE)
-    for r, lab, val, fmt in (
-        (6, "Route", "ICN-HKG", "@"),
-        (7, "L (cm)", 110, "0"),
-        (8, "W (cm)", 110, "0"),
-        (9, "H (cm)", 150, "0"),
-        (10, "Qty (pcs)", 3, "0"),
-        (11, "Gross (KG)", 400, "0.00"),
-        (12, "B/L 수", 1, "0"),
-    ):
-        label_cell(ws[f"B{r}"], lab)
-        input_cell(ws[f"C{r}"], val, fmt)
-        ws.row_dimensions[r].height = 24
+def _write_quote_meta(ws):
+    """Shipment meta row + Remark above Charges."""
+    IN = "입력"
+    for rng in list(ws.merged_cells.ranges):
+        if rng.min_row in (9, 23):
+            try:
+                ws.unmerge_cells(str(rng))
+            except Exception:
+                pass
 
-    dv = DataValidation(
-        type="list",
-        formula1='"ICN-HKG,ICN-LAX"',
-        allow_blank=False,
-        showErrorMessage=True,
-        errorTitle="Route",
-        error="Master_DB ROUTE만 선택",
+    for col, text in ((2, "Carrier"), (4, "Valid until")):
+        cell = ws.cell(9, col, text)
+        cell.font = fnt(bold=True, size=10)
+        cell.fill = fill(LIGHT)
+        cell.border = thin
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        lock(cell)
+
+    c_cell = ws.cell(9, 3, f"='{IN}'!{CARRIER_CELL}")
+    c_cell.font = fnt(bold=True, size=10)
+    c_cell.fill = fill(WHITE)
+    c_cell.border = thin
+    c_cell.alignment = Alignment(horizontal="center", vertical="center")
+    lock(c_cell)
+
+    ws.merge_cells("E9:G9")
+    v_cell = ws.cell(9, 5, f"='{IN}'!{VALID_CELL}")
+    v_cell.font = fnt(bold=True, size=10)
+    v_cell.fill = fill(WHITE)
+    v_cell.border = thin
+    v_cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    lock(v_cell)
+    for c in (6, 7):
+        ws.cell(9, c).border = thin
+        ws.cell(9, c).fill = fill(WHITE)
+        lock(ws.cell(9, c))
+    ws.row_dimensions[9].height = 20
+
+    lab = ws.cell(23, 2, "Remark")
+    lab.font = fnt(bold=True, size=10, color=WHITE)
+    lab.fill = fill(SLATE)
+    lab.border = thin
+    lab.alignment = Alignment(horizontal="center", vertical="center")
+    lock(lab)
+    ws.merge_cells("C23:G23")
+    rem = ws.cell(23, 3, f"='{IN}'!{REMARK_CELL}")
+    rem.font = fnt(size=10)
+    rem.fill = fill(LIGHT)
+    rem.border = thin
+    rem.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True, indent=1)
+    lock(rem)
+    for c in range(4, 8):
+        ws.cell(23, c).fill = fill(LIGHT)
+        ws.cell(23, c).border = thin
+        lock(ws.cell(23, c))
+    ws.row_dimensions[23].height = 28
+
+
+def _charge_line(ws, row, item, unit, ref_formula, editable_item=False):
+    """Write one cost line matching baseline 참고(I)/예외(J) layout."""
+    # E:F item, G:H unit, I ref, J ovr
+    for rng in list(ws.merged_cells.ranges):
+        if rng.min_row == row and rng.min_col in (5, 7):
+            try:
+                ws.unmerge_cells(str(rng))
+            except Exception:
+                pass
+
+    ws.merge_cells(start_row=row, start_column=5, end_row=row, end_column=6)
+    cell = ws.cell(row, 5, item)
+    cell.font = fnt(bold=True, size=11)
+    cell.fill = fill(INPUT_BG if editable_item else WHITE)
+    cell.border = thin
+    cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    (unlock if editable_item else lock)(cell)
+    ws.cell(row, 6).border = thin
+    ws.cell(row, 6).fill = fill(INPUT_BG if editable_item else WHITE)
+
+    ws.merge_cells(start_row=row, start_column=7, end_row=row, end_column=8)
+    cell = ws.cell(row, 7, unit)
+    cell.font = fnt(size=10)
+    cell.fill = fill(LIGHT)
+    cell.border = thin
+    cell.alignment = Alignment(horizontal="center", vertical="center")
+    lock(cell)
+    ws.cell(row, 8).border = thin
+    ws.cell(row, 8).fill = fill(LIGHT)
+
+    ref = ws.cell(row, 9, ref_formula)
+    ref.fill = fill(WHITE)
+    ref.font = fnt(bold=True, size=10)
+    ref.alignment = Alignment(horizontal="right", vertical="center")
+    ref.number_format = "#,##0.00"
+    ref.border = thin
+    lock(ref)
+
+    ovr = ws.cell(row, 10, None)
+    ovr.fill = fill(YELLOW)
+    ovr.font = fnt(bold=True, size=10)
+    ovr.alignment = Alignment(horizontal="right", vertical="center")
+    ovr.number_format = "#,##0.00"
+    ovr.border = thin
+    unlock(ovr)
+
+
+def patch_input(ws, routes):
+    unprotect(ws)
+
+    # FX next to Currency block (after we move Currency). Place now at free area near tip.
+    # Put Ex.Rate at H3/I3 (outside main cargo header merges carefully — E3:M3 is merged tip)
+    # Use B30/C30 area after rebuild of bottom.
+
+    # Update Break / Air Rate / FSC / SSC for -45 column layout
+    ws["C21"] = (
+        '=IFERROR(IF(C20="","",IF(C20<Master_DB!$B$9,"-45",'
+        'IF(C20>=Master_DB!$B$12,"+1000",IF(C20>=Master_DB!$B$11,"+500",'
+        'IF(C20>=Master_DB!$B$10,"+100","+45"))))),"")'
     )
-    dv.add("C6")
-    ws.add_data_validation(dv)
+    ws["C22"] = (
+        '=IFERROR(IF(OR(C5="",C20=""),"",'
+        f'IF(C20<Master_DB!$B$9,VLOOKUP(C5,{AIR_RNG},3,FALSE),'
+        f'IF(C20>=Master_DB!$B$12,VLOOKUP(C5,{AIR_RNG},7,FALSE),'
+        f'IF(C20>=Master_DB!$B$11,VLOOKUP(C5,{AIR_RNG},6,FALSE),'
+        f'IF(C20>=Master_DB!$B$10,VLOOKUP(C5,{AIR_RNG},5,FALSE),'
+        f'VLOOKUP(C5,{AIR_RNG},4,FALSE)))))),"")'
+    )
+    ws["C23"] = f'=IFERROR(IF(C5="","",VLOOKUP(C5,{AIR_RNG},2,FALSE)),"")'
 
-    # 2. Auto calc
-    header_bar(ws, "E5:F5", "2. 자동 계산", NAVY)
-    for r, lab, formula, fmt, emp in (
-        (6, "CBM", '=IFERROR(IF(COUNTA(C7:C10)<4,"",C7*C8*C9*C10/Master_DB!$B$6),"")', "0.000", False),
-        (7, "부피중량 (KG)", '=IFERROR(IF(F6="","",F6*Master_DB!$B$5),"")', "0.00", False),
-        (8, "C.W. (KG)", '=IFERROR(IF(OR(C11="",F7=""),"",MAX(C11,F7)),"")', "0.00", True),
-        (
-            9,
-            "Weight Break",
-            '=IFERROR(IF(F8="","",IF(F8>=Master_DB!$B$12,"+1000",IF(F8>=Master_DB!$B$11,"+500",IF(F8>=Master_DB!$B$10,"+100","+45")))),"")',
-            "@",
-            False,
-        ),
-        (
-            10,
-            "Air Rate ($/kg)",
-            '=IFERROR(IF(OR(C6="",F8=""),"",IF(F8>=Master_DB!$B$12,VLOOKUP(C6,Master_DB!$A$16:$H$17,6,FALSE),IF(F8>=Master_DB!$B$11,VLOOKUP(C6,Master_DB!$A$16:$H$17,5,FALSE),IF(F8>=Master_DB!$B$10,VLOOKUP(C6,Master_DB!$A$16:$H$17,4,FALSE),VLOOKUP(C6,Master_DB!$A$16:$H$17,3,FALSE))))),"")',
-            "0.00",
-            False,
-        ),
-        (11, "Air MIN ($)", '=IFERROR(IF(C6="","",VLOOKUP(C6,Master_DB!$A$16:$H$17,2,FALSE)),"")', "0.00", False),
-        (12, "FSC ($/kg)", '=IFERROR(IF(C6="","",VLOOKUP(C6,Master_DB!$A$16:$H$17,7,FALSE)),"")', "0.00", False),
-        (13, "SSC ($/kg)", '=IFERROR(IF(C6="","",VLOOKUP(C6,Master_DB!$A$16:$H$17,8,FALSE)),"")', "0.00", False),
+    # Expand existing local INDEX ranges A21:A23 -> A21:A40
+    for addr in ("G21", "I21", "G22", "I22", "G23", "I23"):
+        v = ws[addr].value
+        if isinstance(v, str):
+            ws[addr].value = (
+                v.replace("Master_DB!$A$21:$A$23", LOCAL_A)
+                .replace("Master_DB!$B$21:$B$23", LOCAL_B)
+                .replace("Master_DB!$C$21:$C$23", LOCAL_C)
+                .replace("Master_DB!$D$21:$D$23", LOCAL_D)
+                .replace("Master_DB!$A$16:$H$50", AIR_RNG)
+                .replace("Master_DB!$A$16:$I$50", AIR_RNG)
+            )
+
+    # Clear old TOTAL / Currency block (will rewrite lower)
+    # Unmerge TOTAL block E25:H26 / I25:J26 if present
+    for rng in list(ws.merged_cells.ranges):
+        if rng.min_row >= 24:
+            try:
+                ws.unmerge_cells(str(rng))
+            except Exception:
+                pass
+
+    # Wipe rows 24-40 content in charge/total area (E-J and B-D footer)
+    for r in range(24, 42):
+        for c in range(2, 11):
+            cell = ws.cell(r, c)
+            cell.value = None
+            cell.fill = PatternFill()
+            cell.border = Border()
+
+    # Restore left-panel FSC/SSC rates (I19/I20 and 견적서 depend on C24/C25).
+    # Must run AFTER wipe — earlier wipe was clearing these and blanking Quote FSC/SSC.
+    for r, label, col_idx in (
+        (24, "FSC /kg", 8),
+        (25, "SSC /kg", 9),
     ):
-        label_cell(ws[f"E{r}"], lab)
-        value_cell(ws[f"F{r}"], formula, fmt, emphasize=emp)
-        ws.row_dimensions[r].height = 24
+        lab = ws.cell(r, 2, label)
+        lab.font = fnt(bold=True, size=10)
+        lab.fill = fill(LIGHT)
+        lab.border = thin
+        lab.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+        lock(lab)
+        rate = ws.cell(
+            r,
+            3,
+            f'=IFERROR(IF(C5="","",VLOOKUP(C5,{AIR_RNG},{col_idx},FALSE)),"")',
+        )
+        rate.font = fnt(bold=True, size=11)
+        rate.fill = fill(WHITE)
+        rate.border = thin
+        rate.alignment = Alignment(horizontal="center")
+        rate.number_format = "0.00"
+        lock(rate)
 
-    # 3. Total card
-    header_bar(ws, "H5:I5", "TOTAL APPX. AMOUNT", ORANGE)
-    ws.merge_cells("H6:I8")
-    ws["H6"] = '=IFERROR(IF(H17="","",SUM(H17:H22)),"")'
-    ws["H6"].font = fnt(bold=True, size=26)
-    ws["H6"].fill = fill(INPUT_BG)
-    ws["H6"].alignment = Alignment(horizontal="center", vertical="center")
-    ws["H6"].number_format = '"$"#,##0.00'
-    paint_merge(ws, "H6:I8", INPUT_BG)
-    lock(ws["H6"])
+    # Terminal Charge (Master-linked)
+    term_ref = (
+        f'=IFERROR(IF(C20="","",MAX(INDEX({LOCAL_C},MATCH("Terminal Charge",{LOCAL_A},0))*C20,'
+        f'INDEX({LOCAL_D},MATCH("Terminal Charge",{LOCAL_A},0)))),"")'
+    )
+    _charge_line(
+        ws,
+        24,
+        "Terminal Charge",
+        f'=IFERROR(INDEX({LOCAL_B},MATCH("Terminal Charge",{LOCAL_A},0)),"")',
+        term_ref,
+    )
 
-    for r, lab, val, fmt in (
-        (10, "Currency", "USD", None),
-        (11, "Route", '=IFERROR(C6,"")', None),
-        (12, "C.W.", '=IFERROR(F8,"")', "0.00"),
-    ):
-        label_cell(ws[f"H{r}"], lab)
-        ws[f"I{r}"] = val
-        ws[f"I{r}"].fill = fill(LIGHT)
-        ws[f"I{r}"].border = thin
-        ws[f"I{r}"].font = fnt(bold=True, size=11)
-        ws[f"I{r}"].alignment = Alignment(horizontal="center", vertical="center")
-        if fmt:
-            ws[f"I{r}"].number_format = fmt
-        lock(ws[f"I{r}"])
-
-    # 4. Breakdown — Item | Unit | Amount only (no formula captions in cells)
-    header_bar(ws, "B15:I15", "3. 비용 내역 (Breakdown)", NAVY)
-    for col, text, merge in (
-        ("B16", "항목", "B16:C16"),
-        ("E16", "단위", "E16:F16"),
-        ("H16", "금액 (USD)", "H16:I16"),
-    ):
-        ws.merge_cells(merge)
-        ws[col] = text
-        paint_merge(ws, merge, SLATE)
-        ws[col].font = fnt(bold=True, size=10, color=WHITE)
-        ws[col].alignment = Alignment(horizontal="center", vertical="center")
-
-    rows = [
-        (
-            17,
-            "Air Freight",
-            '=IFERROR(F9,"")',
-            '=IFERROR(IF(OR(F10="",F8="",F11=""),"",MAX(F10*F8,F11)),"")',
-        ),
-        (18, "FSC", "Per KG", '=IFERROR(IF(OR(F12="",F8=""),"",F12*F8),"")'),
-        (19, "SSC", "Per KG", '=IFERROR(IF(OR(F13="",F8=""),"",F13*F8),"")'),
-        (
-            20,
-            "Handling Fee",
-            '=IFERROR(INDEX(Master_DB!$B$21:$B$23,MATCH("Handling Fee",Master_DB!$A$21:$A$23,0)),"")',
-            '=IFERROR(MAX(INDEX(Master_DB!$C$21:$C$23,MATCH("Handling Fee",Master_DB!$A$21:$A$23,0)),INDEX(Master_DB!$D$21:$D$23,MATCH("Handling Fee",Master_DB!$A$21:$A$23,0))),"")',
-        ),
-        (
-            21,
-            "Doc Fee",
-            '=IFERROR(INDEX(Master_DB!$B$21:$B$23,MATCH("Doc Fee",Master_DB!$A$21:$A$23,0)),"")',
-            '=IFERROR(IF(C12="","",MAX(INDEX(Master_DB!$C$21:$C$23,MATCH("Doc Fee",Master_DB!$A$21:$A$23,0)),INDEX(Master_DB!$D$21:$D$23,MATCH("Doc Fee",Master_DB!$A$21:$A$23,0)))*C12),"")',
-        ),
-        (
-            22,
-            "Trucking",
-            '=IFERROR(INDEX(Master_DB!$B$21:$B$23,MATCH("Trucking",Master_DB!$A$21:$A$23,0)),"")',
-            '=IFERROR(IF(F6="","",MAX(INDEX(Master_DB!$C$21:$C$23,MATCH("Trucking",Master_DB!$A$21:$A$23,0))*F6,INDEX(Master_DB!$D$21:$D$23,MATCH("Trucking",Master_DB!$A$21:$A$23,0)))),"")',
-        ),
+    # Other 1-6 — generic slots with helpful default names + optional auto refs
+    others = [
+        ("Other 1 (XRAY)", "Per KG", '=IFERROR(IF(C20="","",INDEX(Master_DB!$C$21:$C$40,MATCH("XRAY",Master_DB!$A$21:$A$40,0))*C20),"")'),
+        ("Other 2 (CFS)", "Per KG", '=IFERROR(IF(C20="","",MAX(INDEX(Master_DB!$C$21:$C$40,MATCH("CFS",Master_DB!$A$21:$A$40,0))*C20,INDEX(Master_DB!$D$21:$D$40,MATCH("CFS",Master_DB!$A$21:$A$40,0)))),"")'),
+        ("Other 3 (Pickup)", "Per Shipment", '=IFERROR(INDEX(Master_DB!$D$21:$D$40,MATCH("Pickup (temp)",Master_DB!$A$21:$A$40,0)),"")'),
+        ("Other 4 (Export)", "Per Entry", '=IFERROR(INDEX(Master_DB!$D$21:$D$40,MATCH("Export declaration",Master_DB!$A$21:$A$40,0))*F5,"")'),
+        ("Other 5 (RE-PACK)", "Per PLT", '=IFERROR(IF(SUM(C11:L11)=0,"",INDEX(Master_DB!$C$21:$C$40,MATCH("RE-PACKING",Master_DB!$A$21:$A$40,0))*SUM(C11:L11)),"")'),
+        ("Other 6 (Gate/etc)", "Manual", None),
     ]
+    for i, (name, unit, formula) in enumerate(others):
+        _charge_line(ws, 25 + i, name, unit, formula, editable_item=True)
 
-    for r, item, unit, amt in rows:
-        ws.merge_cells(f"B{r}:C{r}")
-        ws[f"B{r}"] = item
-        ws[f"B{r}"].font = fnt(bold=True, size=11)
-        ws[f"B{r}"].alignment = Alignment(horizontal="left", vertical="center", indent=1)
-        paint_merge(ws, f"B{r}:C{r}", WHITE)
+    # TOTAL APPX
+    parts = [f'IF(J{r}="",I{r},J{r})' for r in range(CH_FIRST, CH_LAST + 1)]
+    # Currency=HKD -> * Ex.Rate; else keep
+    conv = f'IF({CUR_CELL}="HKD",{FX_CELL},1)'
+    tot_formula = f'=IFERROR(({"+".join(parts)})*{conv},"")'
 
-        ws.merge_cells(f"E{r}:F{r}")
-        ws[f"E{r}"] = unit
-        ws[f"E{r}"].font = fnt(size=10, color=MUTED)
-        ws[f"E{r}"].alignment = Alignment(horizontal="center", vertical="center")
-        paint_merge(ws, f"E{r}:F{r}", LIGHT)
+    ws.merge_cells(f"E{TOT_ROW}:H{TOT_ROW + 1}")
+    cell = ws.cell(TOT_ROW, 5, "TOTAL APPX. AMOUNT")
+    cell.fill = fill(ORANGE)
+    cell.font = fnt(bold=True, size=11, color=WHITE)
+    cell.alignment = Alignment(horizontal="center", vertical="center")
+    cell.border = thin
+    lock(cell)
+    for r in range(TOT_ROW, TOT_ROW + 2):
+        for c in range(5, 9):
+            ws.cell(r, c).fill = fill(ORANGE)
+            ws.cell(r, c).border = thin
+            lock(ws.cell(r, c))
 
-        ws.merge_cells(f"H{r}:I{r}")
-        ws[f"H{r}"] = amt
-        ws[f"H{r}"].number_format = '"$"#,##0.00'
-        ws[f"H{r}"].font = fnt(bold=True, size=11)
-        ws[f"H{r}"].alignment = Alignment(horizontal="center", vertical="center")
-        paint_merge(ws, f"H{r}:I{r}", LIGHT)
-        ws.row_dimensions[r].height = 26
+    ws.merge_cells(f"I{TOT_ROW}:J{TOT_ROW + 1}")
+    tot = ws[TOT_AMT]
+    tot.value = tot_formula
+    tot.fill = fill(INPUT_BG)
+    tot.font = fnt(bold=True, size=18)
+    tot.alignment = Alignment(horizontal="center", vertical="center")
+    tot.number_format = "#,##0.00"
+    tot.border = thin
+    lock(tot)
+    for r in range(TOT_ROW, TOT_ROW + 2):
+        for c in (9, 10):
+            ws.cell(r, c).fill = fill(INPUT_BG)
+            ws.cell(r, c).border = thin
+            lock(ws.cell(r, c))
 
-    ws["B24"] = "CASE 입력값·기대결과는 Guide 시트  |  요율 변경은 Master_DB 노란 칸만"
-    ws["B24"].font = fnt(size=9, color=MUTED)
-    ws.merge_cells("B24:I24")
-    lock(ws["B24"])
+    # Footer: Currency (auto from Master CUR) / Ex.Rate / Route / C.W.
+    foot = TOT_ROW + 2  # 33
+    # Currency follows Route → Master!CUR (J). Unlock so desk can override if needed.
+    cur_formula = f'=IFERROR(IF(C5="","",VLOOKUP(C5,{AIR_RNG},{CUR_COL},FALSE)),"USD")'
+    labels = [
+        (foot, "Currency", cur_formula, True),
+        (foot + 1, "Ex.Rate", 7.8, True),
+        (foot + 2, "Route", '=IFERROR(C5,"")', False),
+        (foot + 3, "C.W.", '=IFERROR(C20,"")', False),
+    ]
+    for r, label, val, is_input in labels:
+        lab = ws.cell(r, 2, label)
+        lab.font = fnt(bold=True, size=10)
+        lab.border = thin
+        lab.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+        lock(lab)
+        ws.merge_cells(start_row=r, start_column=3, end_row=r, end_column=4)
+        cell = ws.cell(r, 3, val)
+        cell.border = thin
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        if is_input:
+            if label == "Currency":
+                cell.fill = fill(GREEN_BG)
+                cell.font = fnt(bold=True, size=11, color=GREEN)
+                unlock(cell)  # override OK
+            else:
+                cell.fill = fill(YELLOW)
+                cell.font = fnt(bold=True, size=11)
+                unlock(cell)
+                cell.number_format = "0.0"
+        else:
+            cell.fill = fill(GREEN_BG if label == "C.W." else LIGHT)
+            cell.font = fnt(
+                bold=True if label == "C.W." else False,
+                size=11,
+                color=GREEN if label == "C.W." else NAVY,
+            )
+            lock(cell)
+            if label == "C.W.":
+                cell.number_format = "0.00"
 
-    ws.protection.sheet = True
-    ws.protection.enable()
+    _write_input_quote_meta(ws, tip_after_meta=True)
+
+    # Route + Currency dropdowns
+    ws.data_validations.dataValidation = []
+    if routes:
+        dv = DataValidation(
+            type="list",
+            formula1='"' + ",".join(routes) + '"',
+            allow_blank=False,
+            showErrorMessage=False,
+        )
+        dv.add("C5")
+        ws.add_data_validation(dv)
+    dv_cur = DataValidation(
+        type="list",
+        formula1='"USD,HKD"',
+        allow_blank=False,
+        showErrorMessage=False,
+    )
+    dv_cur.add(CUR_CELL)
+    ws.add_data_validation(dv_cur)
+
+    protect(ws)
+
+
+def patch_quote(ws):
+    unprotect(ws)
+    IN = "입력"
+
+    # Currency ref -> C33, TOTAL -> I31, expand charge lines
+    # Clear old charges area from row 24 down and rebuild
+    for rng in list(ws.merged_cells.ranges):
+        if rng.min_row >= 24:
+            try:
+                ws.unmerge_cells(str(rng))
+            except Exception:
+                pass
+
+    for r in range(24, 55):
+        for c in range(2, 8):
+            cell = ws.cell(r, c)
+            cell.value = None
+            cell.fill = PatternFill()
+            cell.border = Border()
+
+    # Shipment currency already G7 = 입력!C27 — update to C33
+    ws["G7"] = f"='{IN}'!{CUR_CELL}"
+    _write_quote_meta(ws)
+
+    ws.merge_cells("B24:G24")
+    cell = ws.cell(24, 2, "Charges")
+    cell.fill = fill(NAVY)
+    cell.font = fnt(bold=True, size=11, color=WHITE)
+    cell.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    lock(cell)
+    for c in range(2, 8):
+        ws.cell(24, c).fill = fill(NAVY)
+        ws.cell(24, c).border = thin
+        lock(ws.cell(24, c))
+
+    ws.merge_cells("B25:E25")
+    cell = ws.cell(25, 2, "Description")
+    cell.fill = fill(SLATE)
+    cell.font = fnt(bold=True, size=10, color=WHITE)
+    cell.alignment = Alignment(horizontal="center")
+    lock(cell)
+    for c in range(2, 6):
+        ws.cell(25, c).fill = fill(SLATE)
+        ws.cell(25, c).border = thin
+        lock(ws.cell(25, c))
+
+    ws.merge_cells("F25:G25")
+    cell = ws.cell(25, 6, "Amount")
+    cell.fill = fill(SLATE)
+    cell.font = fnt(bold=True, size=10, color=WHITE)
+    cell.alignment = Alignment(horizontal="center")
+    lock(cell)
+    ws.cell(25, 7).fill = fill(SLATE)
+    ws.cell(25, 7).border = thin
+    lock(ws.cell(25, 7))
+
+    qr = 26
+    for src in range(CH_FIRST, CH_LAST + 1):
+        ws.merge_cells(start_row=qr, start_column=2, end_row=qr, end_column=5)
+        name = ws.cell(qr, 2, f"='{IN}'!E{src}")
+        name.font = fnt(bold=True, size=11)
+        name.border = thin
+        name.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+        name.fill = fill(LIGHT)
+        lock(name)
+        for c in (3, 4, 5):
+            ws.cell(qr, c).border = thin
+            lock(ws.cell(qr, c))
+
+        ws.merge_cells(start_row=qr, start_column=6, end_row=qr, end_column=7)
+        # applied amount already FX-converted on 입력 TOTAL; line amounts show raw then
+        # apply same conversion for display consistency
+        amt = (
+            f"=IFERROR(IF('{IN}'!J{src}=\"\",\"\",'{IN}'!J{src}),"
+            f"IFERROR('{IN}'!I{src},\"\"))*IF('{IN}'!{CUR_CELL}=\"HKD\",'{IN}'!{FX_CELL},1)"
+        )
+        # Fix: IFERROR with two args wrongly. Use IF blank exception then ref.
+        amt = (
+            f"=IFERROR("
+            f"IF('{IN}'!J{src}=\"\",'{IN}'!I{src},'{IN}'!J{src})"
+            f"*IF('{IN}'!{CUR_CELL}=\"HKD\",'{IN}'!{FX_CELL},1),\"\")"
+        )
+        cell = ws.cell(qr, 6, amt)
+        cell.fill = fill(LIGHT)
+        cell.font = fnt(size=11)
+        cell.alignment = Alignment(horizontal="right", vertical="center")
+        cell.number_format = "#,##0.00"
+        cell.border = thin
+        lock(cell)
+        ws.cell(qr, 7).fill = fill(LIGHT)
+        ws.cell(qr, 7).border = thin
+        ws.cell(qr, 7).alignment = Alignment(horizontal="right", vertical="center")
+        lock(ws.cell(qr, 7))
+        qr += 1
+
+    ws.merge_cells(start_row=qr, start_column=2, end_row=qr, end_column=5)
+    cell = ws.cell(qr, 2, "TOTAL APPX. AMOUNT")
+    cell.fill = fill(ORANGE)
+    cell.font = fnt(bold=True, size=11, color=WHITE)
+    cell.alignment = Alignment(horizontal="center", vertical="center")
+    lock(cell)
+    for c in range(2, 6):
+        ws.cell(qr, c).fill = fill(ORANGE)
+        ws.cell(qr, c).border = thin
+        lock(ws.cell(qr, c))
+
+    ws.merge_cells(start_row=qr, start_column=6, end_row=qr + 1, end_column=7)
+    cell = ws.cell(qr, 6, f"='{IN}'!{TOT_AMT}")
+    cell.fill = fill(INPUT_BG)
+    cell.font = fnt(bold=True, size=18)
+    cell.alignment = Alignment(horizontal="right", vertical="center")
+    cell.number_format = "#,##0.00"
+    cell.border = thin
+    lock(cell)
+    for r in (qr, qr + 1):
+        for c in (6, 7):
+            ws.cell(r, c).fill = fill(INPUT_BG)
+            ws.cell(r, c).border = thin
+            lock(ws.cell(r, c))
+
+    note_r = qr + 3
+    ws.merge_cells(start_row=note_r, start_column=2, end_row=note_r, end_column=7)
+    ws.cell(note_r, 2, "This quotation is indicative and subject to confirmation.")
+    ws.cell(note_r, 2).font = fnt(size=9, color=MUTED)
+    lock(ws.cell(note_r, 2))
+
+    # PDF/print: fit one A4 page so charges are not clipped
+    ws.print_area = f"B2:G{note_r}"
+    ws.page_setup.orientation = "portrait"
+    ws.page_setup.paperSize = ws.PAPERSIZE_A4
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 1
+    ws.print_options.horizontalCentered = True
+    from openpyxl.worksheet.page import PageMargins
+
+    ws.page_margins = PageMargins(
+        left=0.4, right=0.4, top=0.5, bottom=0.5, header=0.2, footer=0.2
+    )
+    ws.column_dimensions["B"].width = 16
+    ws.column_dimensions["C"].width = 20
+    ws.column_dimensions["F"].width = 14
+    ws.column_dimensions["G"].width = 12
+
+    protect(ws)
 
 
 def build_guide(ws):
-    """Submission-ready brief for CM (no tutorial tone)."""
     ws.sheet_view.showGridLines = False
-    set_widths(
-        ws,
-        {
-            "A": 2,
-            "B": 12,
-            "C": 8,
-            "D": 8,
-            "E": 8,
-            "F": 8,
-            "G": 10,
-            "H": 14,
-            "I": 26,
-            "J": 12,
-        },
-    )
-
-    ws["B2"] = "작업 안내"
+    ws.column_dimensions["A"].width = 2
+    ws.column_dimensions["B"].width = 100
+    ws["B2"] = "Guide — 범용 가견적 (CM UI 유지)"
     ws["B2"].font = fnt(bold=True, size=16)
-
-    ws["B4"] = "1. 파일 구성"
-    ws["B4"].font = fnt(bold=True, size=12, color=ORANGE)
-    for i, t in enumerate(
-        [
-            "Master_DB : 항공 구간 요율(Weight Break)·할증(FSC/SSC)·로컬 단가 관리 (Backend)",
-            "Quote : 화물 입력 및 가견적 산출 화면 (Frontend / 원페이지 대시보드)",
-            "요율 변경 시 Master_DB의 노란색 셀만 수정. Quote 수식에는 단가를 직접 기입하지 않음.",
-        ]
-    ):
-        cell = ws.cell(5 + i, 2, t)
-        cell.font = fnt(size=11)
-        ws.merge_cells(start_row=5 + i, start_column=2, end_row=5 + i, end_column=10)
-
-    ws["B9"] = "2. 사용 방법"
-    ws["B9"].font = fnt(bold=True, size=12, color=ORANGE)
-    for i, t in enumerate(
-        [
-            "Quote 시트에서 Route, 치수(L/W/H), 수량, 실중량, B/L 수를 입력한다. (주황색 셀)",
-            "CBM·부피중량·C.W.·적용 Weight Break·항목별 금액·TOTAL APPX.는 자동 계산된다.",
-            "마스터 요율·MIN 변경은 Master_DB에서 처리하며, 필요 시 차장 확인 후 반영한다.",
-        ]
-    ):
-        cell = ws.cell(10 + i, 2, t)
-        cell.font = fnt(size=11)
-        ws.merge_cells(start_row=10 + i, start_column=2, end_row=10 + i, end_column=10)
-
-    ws["B14"] = "3. 산출 기준 (의뢰서)"
-    ws["B14"].font = fnt(bold=True, size=12, color=ORANGE)
-    for i, t in enumerate(
-        [
-            "CBM = L × W × H × Qty ÷ 1,000,000  /  부피중량 = CBM × 167  /  C.W. = MAX(실중량, 부피중량)",
-            "항공운임 = MAX(적용단가 × C.W., MIN)  /  FSC·SSC = 각 단가 × C.W.",
-            "로컬: Handling·Doc는 건(BL) 단위, Trucking = MAX(단가 × CBM, MIN)",
-            "Quote 단가는 Master_DB를 VLOOKUP·INDEX/MATCH로 참조. 빈 입력 시 IFERROR로 오류 표시 방지.",
-        ]
-    ):
-        cell = ws.cell(15 + i, 2, t)
-        cell.font = fnt(size=11)
-        ws.merge_cells(start_row=15 + i, start_column=2, end_row=15 + i, end_column=10)
-
-    ws["B20"] = "4. 검증 CASE (Route: ICN-HKG) — Quote 입력란에 아래 수치 적용"
-    ws["B20"].font = fnt(bold=True, size=12, color=ORANGE)
-    ws.merge_cells("B20:J20")
-
-    headers = ["CASE", "L", "W", "H", "Qty", "Gross", "C.W.", "확인 포인트", "TOTAL APPX."]
-    for c, h in enumerate(headers, 2):
-        cell = ws.cell(21, c, h)
-        cell.fill = fill(NAVY)
-        cell.font = fnt(bold=True, size=10, color=WHITE)
-        cell.alignment = Alignment(horizontal="center", wrap_text=True, vertical="center")
-        cell.border = thin
-    ws.row_dimensions[21].height = 28
-
-    for i, row in enumerate(
-        [
-            ("A 부피화물", 110, 110, 150, 3, 400, 909.32, "Break +500 / $3.20", 3728.47),
-            ("B 고중량", 30, 30, 30, 1, 80, 80.00, "Break +45 / $4.50", 555.00),
-            ("C 미니멈", 20, 20, 20, 1, 3, 3.00, "Air $50 · Truck $80", 187.25),
-        ]
-    ):
-        r = 22 + i
-        for c, v in enumerate(row, 2):
-            cell = ws.cell(r, c, v)
-            cell.border = thin
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            cell.fill = fill(LIGHT)
-            if c == 8:
-                cell.number_format = "0.00"
-            if c == 10:
-                cell.number_format = '"$"#,##0.00'
-
-    ws["B26"] = "5. 데이터·배포"
-    ws["B26"].font = fnt(bold=True, size=12, color=ORANGE)
-    for i, t in enumerate(
-        [
-            "본 파일의 Master 수치는 의뢰서 기준 가상(dummy) 데이터이다, 검증용 CASE 3건으로 로직을 확인한 상태이다.",
-            "실요율 반영 및 항목 추가는 별도 확인 후 Master_DB에 갱신한다. (Quote 화면 구조는 유지)",
-            "시트 보호: Quote는 입력 셀만 편집 가능. 수식 수정 시 [검토] → 시트 보호 해제.",
-            "클라우드 업로드·권한: 10층 Room H Teddy 담당.",
-        ]
-    ):
-        cell = ws.cell(27 + i, 2, t)
-        cell.font = fnt(size=11)
-        ws.merge_cells(start_row=27 + i, start_column=2, end_row=27 + i, end_column=10)
-
-    ws["B32"] = "주황=입력  /  노랑(Master)=요율  /  초록=C.W.  /  회색=자동산출"
-    ws["B32"].font = fnt(size=9, color=MUTED)
-    ws.merge_cells("B32:J32")
+    lines = [
+        "",
+        "1. 본질",
+        "· Master_DB = 거의 고정 요율 (노란칸만 갱신)",
+        "· 입력 = 화물 + 자동 C.W./Break + 참고(Master) / 예외(건별 수기) / Other(특수항목)",
+        "· 견적서 = 입력 100% 참조 (화주 전달용)",
+        "· 특수건(KEEP COOL 등)은 템플릿을 바꾸지 말고 예외·Other로 해결",
+        "",
+        "2. 과금 기준",
+        "· Trucking = Rate × CBM (MIN) — kg 미적용",
+        "· Terminal / CFS / XRAY = Rate × C.W.(kg) (MIN)",
+        "· Handling / Doc / Pickup = 건별·BL·shipment",
+        "· -45 = C.W. < 45kg / +45 이상 = 해당 weight break",
+        "",
+        "3. 통화",
+        "· Master J열 CUR = 구간 요율 통화 (ICN*=USD, HKG*=HKD 기본)",
+        "· 입력 Currency = Route VLOOKUP(CUR) 자동 (필요시 덮어쓰기)",
+        "· Currency=USD → TOTAL 그대로 / HKD → Ex.Rate 곱함 (이미 HKD면 Ex.Rate=1)",
+        "· 입력 Carrier / Remark / Valid until → 견적서에 표시 (KEEP COOL 등)",
+        "",
+        "4. 예시 — HKG-ICN KEEP COOL Chocolate (테스트 입력)",
+        "· Route=HKG-ICN, B/L=1, #1=110×110×109 /1 /194.5 → C.W.≈220 Break=+100",
+        "· Currency=HKD, Ex.Rate=1 (케이스 금액이 이미 HKD)",
+        "· Handling 예외 321 / Doc 예외 15 / Trucking 예외 0 (해당 없으면)",
+        "· Other 참고값 확인 후 필요시 예외 덮어쓰기 → 견적서 PDF",
+        "",
+        "5. ICN-HKG 6-pallet 샘플 (기본 데이터) TOTAL ≈ $3,728",
+    ]
+    for i, t in enumerate(lines):
+        cell = ws.cell(3 + i, 2, t)
+        cell.font = (
+            fnt(bold=True, size=11, color=ORANGE)
+            if t.startswith(("1.", "2.", "3.", "4.", "5."))
+            else fnt(size=11)
+        )
 
 
-def verify_logic():
-    vol_factor, divisor = 167, 1_000_000
-    air = {"MIN": 50, 45: 4.5, 100: 3.8, 500: 3.2, 1000: 2.8, "FSC": 0.6, "SSC": 0.15}
+def verify():
+    # CASE A: ICN-HKG classic sample dims from original verify engine
+    air = {"MIN": 50, "u45": 5.5, 45: 4.5, 100: 3.8, 500: 3.2, 1000: 2.8, "FSC": 0.6, "SSC": 0.15}
+    L, W, H, qty, gross = 110, 110, 150, 3, 400
+    cbm = L * W * H * qty / 1_000_000
+    cw = max(gross, cbm * 167)
+    rate = air[500] if cw >= 500 else air[100]
+    total_a = max(rate * cw, air["MIN"]) + air["FSC"] * cw + air["SSC"] * cw + 30 + 25 + max(15 * cbm, 80)
+    assert abs(cbm - 5.445) < 0.001
+    assert abs(cw - 909.315) < 0.01
+    assert abs(total_a - 3728.47) < 0.02, total_a
+    print(f"CASE A OK: APPX={total_a:.2f}")
 
-    def one(L, W, H, qty, gross):
-        cbm = L * W * H * qty / divisor
-        cw = max(gross, cbm * vol_factor)
-        if cw >= 1000:
-            br, rate = 1000, air[1000]
-        elif cw >= 500:
-            br, rate = 500, air[500]
-        elif cw >= 100:
-            br, rate = 100, air[100]
-        else:
-            br, rate = 45, air[45]
-        air_amt = max(rate * cw, air["MIN"])
-        total = air_amt + air["FSC"] * cw + air["SSC"] * cw + 30 + 25 + max(15 * cbm, 80)
-        return {"cw": cw, "br": br, "rate": rate, "air": air_amt, "truck": max(15 * cbm, 80), "total": total}
-
-    a, b, c = one(110, 110, 150, 3, 400), one(30, 30, 30, 1, 80), one(20, 20, 20, 1, 3)
-    assert abs(a["cw"] - 909.315) < 0.01 and a["br"] == 500
-    assert b["cw"] == 80 and b["rate"] == 4.5
-    assert c["air"] == 50 and c["truck"] == 80
-    return {"A": a, "B": b, "C": c}
+    # Chocolate CW check (generic math, not template lock)
+    cbm_c = 110 * 110 * 109 * 1 / 1_000_000
+    cw_c = max(194.5, cbm_c * 167)
+    assert abs(cw_c - 220.2563) < 0.01, cw_c
+    print(f"Chocolate CW check OK: CBM={cbm_c:.4f} CW={cw_c:.4f}")
+    return total_a
 
 
 def main():
-    cases = verify_logic()
-    print("Logic OK")
-    for k, v in cases.items():
-        print(f"  {k}: CW={v['cw']:.2f} +{v['br']} @{v['rate']} TOTAL={v['total']:.2f}")
+    verify()
+    import sys
 
-    wb = Workbook()
-    ws_q = wb.active
-    ws_q.title = "Quote"
-    ws_m = wb.create_sheet("Master_DB", 0)
-    ws_g = wb.create_sheet("Guide", 2)
-    build_master(ws_m)
-    build_quote(ws_q)
-    build_guide(ws_g)
-    wb._sheets = [ws_m, ws_q, ws_g]
-    wb.save(OUT)
-    print(f"Wrote {OUT}")
+    # --currency-only / --meta-only: patch existing OUT (keeps chocolate fill)
+    if "--currency-only" in sys.argv or "--meta-only" in sys.argv:
+        src = OUT if OUT.exists() else OUT_ALT
+        if not src.exists():
+            raise SystemExit(f"No workbook to patch: {OUT}")
+        wb = load_workbook(src)
+        master = wb["Master_DB"]
+        inp = wb[wb.sheetnames[1]]
+        quote = wb[wb.sheetnames[2]]
+        unprotect(master)
+        unprotect(inp)
+        unprotect(quote)
+        _ensure_route_currency(master)
+        master.column_dimensions["J"].width = 8
+        for r in range(30, 36):
+            v = master.cell(r, 1).value
+            if isinstance(v, str) and ("ROUTE" in v or "구간" in v or "CUR" in v):
+                master.cell(
+                    r,
+                    1,
+                    "A16~ ROUTE | J열 CUR=USD/HKD | -45 / +45… | Trucking=CBM · Terminal/CFS/XRAY=C.W.",
+                )
+                master.cell(r, 1).alignment = Alignment(
+                    horizontal="left", vertical="center", wrap_text=True
+                )
+                master.row_dimensions[r].height = 22
+                break
+        cur_formula = f'=IFERROR(IF(C5="","",VLOOKUP(C5,{AIR_RNG},{CUR_COL},FALSE)),"USD")'
+        cell = inp[CUR_CELL]
+        cell.value = cur_formula
+        cell.fill = fill(GREEN_BG)
+        cell.font = fnt(bold=True, size=11, color=GREEN)
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        unlock(cell)
+        for addr in ("C22", "C23", "C24", "C25"):
+            v = inp[addr].value
+            if isinstance(v, str):
+                inp[addr].value = v.replace("Master_DB!$A$16:$I$50", AIR_RNG)
+        has_cur_dv = False
+        for dv in inp.data_validations.dataValidation:
+            if CUR_CELL in str(dv.sqref):
+                has_cur_dv = True
+                break
+        if not has_cur_dv:
+            dv_cur = DataValidation(
+                type="list", formula1='"USD,HKD"', allow_blank=False, showErrorMessage=False
+            )
+            dv_cur.add(CUR_CELL)
+            inp.add_data_validation(dv_cur)
+
+        # Quote meta: Carrier / Remark / Valid until (chocolate defaults if empty)
+        _write_input_quote_meta(
+            inp,
+            tip_after_meta=True,
+            defaults={
+                "carrier": "KE",
+                "remark": "KEEP COOL / Maintained at 2-8°C at airline terminal",
+                "valid": "31 Aug 2026",
+            },
+        )
+        _write_quote_meta(quote)
+        quote["G7"] = f"='입력'!{CUR_CELL}"
+
+        if "Guide" in wb.sheetnames:
+            build_guide(wb["Guide"])
+        protect(master)
+        protect(inp)
+        protect(quote)
+        wb.save(src)
+        print(f"Live patch OK (currency+meta, kept inputs): {src}")
+        for dest in (
+            ROOT.parents[0] / "public" / "excel" / "WAC_Air_Quotation_Simulator.xlsx",
+            Path.home() / "Downloads" / "WAC_Air_Quotation_Simulator.xlsx",
+        ):
+            try:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(src.read_bytes())
+                print(f"Copied -> {dest}")
+            except OSError as e:
+                print(f"Skip {dest}: {e}")
+        return
+
+    if not BASELINE.exists():
+        raise SystemExit(f"Baseline missing: {BASELINE}")
+
+    wb = load_workbook(BASELINE)
+    # sheet names: Master_DB, 입력, 견적서
+    master = wb["Master_DB"]
+    inp = wb[wb.sheetnames[1]]
+    quote = wb[wb.sheetnames[2]]
+
+    routes = patch_master(master)
+    patch_input(inp, routes)
+    patch_quote(quote)
+
+    if "Guide" in wb.sheetnames:
+        del wb["Guide"]
+    guide = wb.create_sheet("Guide", 3)
+    build_guide(guide)
+
+    saved = None
+    for path in (OUT, OUT_ALT):
+        try:
+            wb.save(path)
+            saved = path
+            print(f"Wrote {path}")
+            break
+        except PermissionError:
+            continue
+    if not saved:
+        raise SystemExit("Close Excel and retry")
+
+    for dest in (
+        ROOT.parents[0] / "public" / "excel" / "WAC_Air_Quotation_Simulator.xlsx",
+        Path.home() / "Downloads" / "WAC_Air_Quotation_Simulator.xlsx",
+    ):
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(saved.read_bytes())
+            print(f"Copied -> {dest}")
+        except OSError as e:
+            print(f"Skip {dest}: {e}")
 
 
 if __name__ == "__main__":

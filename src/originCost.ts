@@ -63,6 +63,8 @@ export const VARIABLE_SLOT_DEFAULTS = {
   other: 0,
 } as const
 
+export const ALWAYS_ON_LOCAL = EXP_LOCAL_MASTER.filter((c) => !c.optional)
+
 export const MASTER_VALIDITY = {
   effective: '2026-03-01',
   expiry: '2026-03-31',
@@ -95,6 +97,16 @@ export type VariableSlots = {
   otherLabel: string
 }
 
+/** Excel 예외 — Master 자동 금액을 이 건만 덮어씀 */
+export type LineOverrides = Partial<Record<string, number>>
+
+/** Excel Other 1–n — 이름+금액으로 줄을 추가 */
+export type ExtraCharge = {
+  id: string
+  label: string
+  amount: number
+}
+
 export type CostLine = {
   id: string
   label: string
@@ -111,6 +123,8 @@ export function buildDeskCostSheet(opts: {
   flags: DeskFlags
   slots: VariableSlots
   usdHkd: number
+  overrides?: LineOverrides
+  extraLines?: ExtraCharge[]
 }): {
   lines: CostLine[]
   localHkd: number
@@ -119,7 +133,16 @@ export function buildDeskCostSheet(opts: {
   totalHkd: number
   totalUsd: number
 } {
-  const { cw, airUsd, airLabel, flags, slots, usdHkd } = opts
+  const {
+    cw,
+    airUsd,
+    airLabel,
+    flags,
+    slots,
+    usdHkd,
+    overrides = {},
+    extraLines = [],
+  } = opts
   const lines: CostLine[] = []
 
   lines.push({
@@ -138,18 +161,22 @@ export function buildDeskCostSheet(opts: {
       if (c.id === 'dg' && !flags.dg) continue
       if (c.id === 'whReg' && !flags.whReg) continue
     }
-    const amount = calcLineAmount(c, cw)
-    if (amount <= 0) continue
+    const auto = calcLineAmount(c, cw)
+    const over = overrides[c.id]
+    const used = typeof over === 'number' && Number.isFinite(over) ? over : auto
+    if (used <= 0) continue
     lines.push({
       id: c.id,
       label: c.label,
-      amount,
+      amount: used,
       currency: 'HKD',
       group: 'local',
       note:
-        c.unit === 'perjob'
-          ? 'per job (min)'
-          : `max(min ${c.min}, ${c.flat}/kg × ${cw.toFixed(1)})`,
+        typeof over === 'number' && Number.isFinite(over)
+          ? `Exception this job (auto ${auto.toFixed(2)})`
+          : c.unit === 'perjob'
+            ? 'per job (min)'
+            : `max(min ${c.min}, ${c.flat}/kg × ${cw.toFixed(1)})`,
     })
   }
 
@@ -180,6 +207,19 @@ export function buildDeskCostSheet(opts: {
       currency: 'HKD',
       group: 'variable',
       note: 'Desk slot',
+    })
+  }
+
+  for (const extra of extraLines) {
+    const amount = Number(extra.amount) || 0
+    if (amount <= 0) continue
+    lines.push({
+      id: extra.id,
+      label: extra.label.trim() || 'Other',
+      amount,
+      currency: 'HKD',
+      group: 'variable',
+      note: 'Added this job',
     })
   }
 

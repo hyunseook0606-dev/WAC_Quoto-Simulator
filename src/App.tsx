@@ -1,26 +1,36 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Navigate, Route, Routes, useSearchParams } from 'react-router-dom'
 import {
   Plane,
   Box,
   ArrowRight,
   Copy,
   CheckCircle2,
-  ChevronRight,
   Loader2,
   Calculator,
   Lock,
-  ExternalLink,
   FileSpreadsheet,
+  Plus,
+  Trash2,
+  Printer,
 } from 'lucide-react'
 import {
   VARIABLE_SLOT_DEFAULTS,
   MASTER_VALIDITY,
   DEFAULT_USD_HKD,
+  ALWAYS_ON_LOCAL,
   buildDeskCostSheet,
+  calcLineAmount,
   type DeskFlags,
   type VariableSlots,
+  type LineOverrides,
+  type ExtraCharge,
 } from './originCost'
-import { Hero } from './Hero'
+import { buildDeskQuotationHtml, printQuotation } from './quoteDocument'
+import { PublicQuoteDHL } from './components/PublicQuoteDHL'
+import { SiteFooter, SiteHeader, Reveal } from './chrome'
+import { HomePage } from './pages/HomePage'
+import { TrackPage } from './pages/TrackPage'
 import { fetchUsdToHkd } from './fx'
 import {
   calcCmQuote,
@@ -36,157 +46,6 @@ type Cargo = {
   height: number
   weight: number
 }
-
-const NAV = [
-  { label: 'About WAC', href: '#about' },
-  { label: 'Instant Quote', href: '#quote' },
-  { label: 'Solutions', href: '#solutions' },
-  { label: 'Network', href: '#network' },
-  { label: 'Contact', href: '#contact' },
-]
-
-const WAC_SITE = 'http://www.waclogistics.com/'
-
-/** Air = Quote product; others = official WAC / Favvy */
-const SOLUTIONS = [
-  {
-    id: 'air',
-    title: 'Air Freight',
-    desc: 'Asia corridor uplift — Instant Quote and origin cost desk on this site.',
-    cover: '/services/air.png',
-    href: '#quote',
-    cta: 'Instant Quote',
-    external: false,
-  },
-  {
-    id: 'ocean',
-    title: 'Ocean Freight',
-    desc: 'FCL & LCL programs at major Asian ports.',
-    cover: '/services/ocean.jpg',
-    href: WAC_SITE,
-    cta: 'View on WAC',
-    external: true,
-  },
-  {
-    id: 'road',
-    title: 'Road Freight',
-    desc: 'Cross-border trucking and last-mile linked to air and ocean.',
-    cover: '/services/road.jpg',
-    href: WAC_SITE,
-    cta: 'View on WAC',
-    external: true,
-  },
-  {
-    id: 'warehouse',
-    title: 'Warehousing',
-    desc: 'Bonded and non-bonded inventory near gateway airports.',
-    cover: '/services/warehouse.jpg',
-    href: WAC_SITE,
-    cta: 'View on WAC',
-    external: true,
-  },
-  {
-    id: 'ecom',
-    title: 'E-Commerce',
-    desc: 'Cross-border fulfillment via W Networks / Favvy.',
-    cover: '/services/ecom.jpg',
-    href: 'https://www.favvyhk.com/',
-    cta: 'Visit Favvy',
-    external: true,
-  },
-] as const
-
-function Reveal({
-  children,
-  className = '',
-  delay = 0,
-}: {
-  children: ReactNode
-  className?: string
-  delay?: number
-}) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [visible, setVisible] = useState(false)
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const io = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setVisible(true)
-          io.unobserve(el)
-        }
-      },
-      { threshold: 0.14, rootMargin: '0px 0px -6% 0px' },
-    )
-    io.observe(el)
-    return () => io.disconnect()
-  }, [])
-
-  return (
-    <div
-      ref={ref}
-      className={`reveal ${visible ? 'reveal-in' : ''} ${className}`}
-      style={{ transitionDelay: `${delay}ms` }}
-    >
-      {children}
-    </div>
-  )
-}
-
-const NETWORK = [
-  {
-    city: 'Korea',
-    focus: 'Seoul · Incheon · Busan',
-  },
-  {
-    city: 'Hong Kong',
-    focus: 'HKG Hub · Pearl River Delta',
-  },
-  {
-    city: 'China',
-    focus: 'Shanghai · Shenzhen · Guangzhou',
-  },
-  {
-    city: 'Asia',
-    focus: 'Singapore · Vietnam · ASEAN',
-  },
-] as const
-
-/** From https://wexpresshk.com/home.html — W Networks */
-const W_NETWORKS = [
-  {
-    name: 'WAC LOGISTICS',
-    desc: 'GLOBAL FORWARDER',
-    url: 'https://www.waclogistics.com/',
-    logo: '/network-1.jpg',
-  },
-  {
-    name: 'W EXPRESS KOREA',
-    desc: 'W NETWORKS KOREA',
-    url: 'https://www.wexpresskr.com/',
-    logo: '/network-2.jpg',
-  },
-  {
-    name: 'W MOBILITY',
-    desc: 'INTERNATIONAL MOVES',
-    url: 'https://www.wmobility.global/',
-    logo: '/network-3.jpg',
-  },
-  {
-    name: 'W CLUB',
-    desc: 'E-COMMERCE',
-    url: 'https://www.conceptwhk.com/',
-    logo: '/network-4.jpg',
-  },
-  {
-    name: 'FAVVY',
-    desc: 'ONLINE FASHION',
-    url: 'https://www.favvyhk.com/',
-    logo: '/network-5.jpg',
-  },
-]
 
 /**
  * ex-HKG major carriers from:
@@ -662,201 +521,11 @@ ${plainTable}
   </tbody>
 </table>
 <br/>
-<div style="color:#64748b;font-size:9pt;">* Variable slots (Cartage / Tunnel / Parking) entered per shipment.</div>
-<div style="color:#64748b;font-size:9pt;">* Local lines from cost item_origin EXP master — auto max(min, flat × C.W.).</div>
+<div style="color:#64748b;font-size:9pt;">* Variable / added lines entered per shipment. Exception amounts override Master for this job only.</div>
+<div style="color:#64748b;font-size:9pt;">* Local lines from EXP master — auto max(min, flat × C.W.) unless exception filled.</div>
 </body></html>`
 
   return { html, plain }
-}
-
-function AirlineLogo({
-  code,
-  name,
-  color,
-  logoSrc,
-}: {
-  code: string
-  name: string
-  color: string
-  logoSrc?: string
-}) {
-  const remote = `https://pics.avs.io/120/80/${code}.png`
-  // Prefer local asset for cargo-only codes (e.g. RH) that passenger logo CDNs miss
-  const [src, setSrc] = useState<string>(logoSrc || remote)
-  const [failed, setFailed] = useState(false)
-
-  return (
-    <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-100 bg-white p-1.5 shadow-sm">
-      {!failed ? (
-        <img
-          src={src}
-          alt={`${name} logo`}
-          className="h-full w-full object-contain"
-          onError={() => {
-            if (!logoSrc && src === remote) {
-              setFailed(true)
-              return
-            }
-            if (logoSrc && src !== logoSrc) {
-              setSrc(logoSrc)
-              return
-            }
-            setFailed(true)
-          }}
-        />
-      ) : (
-        <span
-          className="font-display text-[13px] font-black tracking-wide text-white"
-          style={{
-            background: color,
-            width: '100%',
-            height: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: 6,
-          }}
-        >
-          {code}
-        </span>
-      )}
-    </div>
-  )
-}
-
-function WacLogoMark({ className = 'h-9' }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 220 48"
-      className={className}
-      role="img"
-      aria-label="WAC Logistics"
-    >
-      <g transform="translate(2,6)">
-        <path d="M2 34 L10 2 L16 2 L8 34 Z" fill="#1A2A3A" />
-        <path d="M14 34 L22 2 L28 2 L20 34 Z" fill="#1A2A3A" />
-        <path d="M26 34 L34 2 L40 2 L32 34 Z" fill="#F05023" />
-        <path d="M38 34 L46 2 L52 2 L44 34 Z" fill="#1A2A3A" />
-        <path
-          d="M78 18 A16 16 0 1 0 78 22"
-          fill="none"
-          stroke="#1A2A3A"
-          strokeWidth="8"
-          strokeLinecap="butt"
-        />
-        <path
-          d="M78 22 A16 16 0 0 0 70 32"
-          fill="none"
-          stroke="#F05023"
-          strokeWidth="8"
-          strokeLinecap="butt"
-        />
-      </g>
-      <text
-        x="100"
-        y="22"
-        fill="#1A2A3A"
-        fontFamily="Barlow, IBM Plex Sans, sans-serif"
-        fontWeight="800"
-        fontSize="20"
-        letterSpacing="1.5"
-      >
-        WAC
-      </text>
-      <text
-        x="100"
-        y="38"
-        fill="#1A2A3A"
-        fontFamily="Barlow, IBM Plex Sans, sans-serif"
-        fontWeight="700"
-        fontSize="11"
-        letterSpacing="3.2"
-      >
-        LOGISTICS
-      </text>
-    </svg>
-  )
-}
-
-function WacLogo({
-  variant = 'color',
-  className = 'h-9',
-}: {
-  variant?: 'color' | 'white'
-  className?: string
-}) {
-  const [imgFailed, setImgFailed] = useState(false)
-
-  if (variant === 'color') {
-    if (imgFailed) return <WacLogoMark className={className} />
-    return (
-      <img
-        src="/wac-logo.png"
-        alt="WAC Logistics"
-        className={`${className} w-auto object-contain`}
-        onError={() => setImgFailed(true)}
-      />
-    )
-  }
-
-  if (imgFailed) {
-    return (
-      <span className={`inline-flex items-baseline gap-2 ${className}`}>
-        <span className="font-display text-xl leading-none font-extrabold tracking-widest text-white">
-          WAC
-        </span>
-        <span className="text-[10px] font-semibold tracking-[0.22em] text-white/65">
-          LOGISTICS
-        </span>
-      </span>
-    )
-  }
-
-  return (
-    <img
-      src="/wac-logo-white.png"
-      alt="WAC Logistics"
-      className={`${className} w-auto object-contain opacity-90`}
-      onError={() => setImgFailed(true)}
-    />
-  )
-}
-
-function CostBreakdownBar({
-  baseAmount,
-  surchargeAmount,
-}: {
-  baseAmount: number
-  surchargeAmount: number
-}) {
-  const total = baseAmount + surchargeAmount
-  const basePct = total > 0 ? (baseAmount / total) * 100 : 0
-  const surchargePct = total > 0 ? (surchargeAmount / total) * 100 : 0
-
-  return (
-    <div className="mt-3 w-full">
-      <div className="flex h-1 w-full overflow-hidden rounded-full bg-slate-100">
-        <div
-          className="h-full bg-wac-navy transition-all duration-500"
-          style={{ width: `${basePct}%` }}
-        />
-        <div
-          className="h-full bg-wac-orange transition-all duration-500"
-          style={{ width: `${surchargePct}%` }}
-        />
-      </div>
-      <div className="mt-1.5 flex justify-between text-[10px] font-medium text-slate-400">
-        <span className="inline-flex items-center gap-1">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-wac-navy" />
-          Base {basePct.toFixed(0)}%
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-wac-orange" />
-          Surcharge {surchargePct.toFixed(0)}%
-        </span>
-      </div>
-    </div>
-  )
 }
 
 function formatValidUntil(daysAhead = 7) {
@@ -869,9 +538,14 @@ function formatValidUntil(daysAhead = 7) {
   })
 }
 
-export default function App() {
-  const [origin, setOrigin] = useState('SIN')
-  const [destination, setDestination] = useState('HKG')
+function QuoteWorkspace() {
+  const [searchParams] = useSearchParams()
+  const [origin, setOrigin] = useState(
+    (searchParams.get('from') || 'SIN').toUpperCase(),
+  )
+  const [destination, setDestination] = useState(
+    (searchParams.get('to') || 'HKG').toUpperCase(),
+  )
   const [cargo, setCargo] = useState<Cargo>({
     length: 120,
     width: 100,
@@ -879,12 +553,14 @@ export default function App() {
     weight: 83.6,
   })
   const [copied, setCopied] = useState('')
-  const [showResult, setShowResult] = useState(false)
+  const [showResult, setShowResult] = useState(true)
   const [isLoading, setIsLoading] = useState(false)
   const [toast, setToast] = useState('')
   const [formError, setFormError] = useState('')
   /** public = shipper indicative · desk = internal cost with variable slots */
-  const [quoteMode, setQuoteMode] = useState<'public' | 'desk'>('public')
+  const [quoteMode, setQuoteMode] = useState<'public' | 'desk'>(
+    searchParams.get('mode') === 'desk' ? 'desk' : 'public',
+  )
   const [deskCarrier, setDeskCarrier] = useState('')
   const [usdHkd, setUsdHkd] = useState(DEFAULT_USD_HKD)
   const [fxMeta, setFxMeta] = useState<{
@@ -905,10 +581,15 @@ export default function App() {
     other: VARIABLE_SLOT_DEFAULTS.other,
     otherLabel: 'Other / Ad-hoc',
   })
+  const [overrides, setOverrides] = useState<LineOverrides>({})
+  const [overrideDraft, setOverrideDraft] = useState<Record<string, string>>({})
+  const [extraLines, setExtraLines] = useState<ExtraCharge[]>([])
+  const [deskRemark, setDeskRemark] = useState('')
   const [cmMaster, setCmMaster] = useState<CmMaster | null>(null)
   const [cmQty, setCmQty] = useState(1)
   const [cmImportMsg, setCmImportMsg] = useState('')
   const cmFileRef = useRef<HTMLInputElement>(null)
+
 
   const refreshFx = async () => {
     setFxLoading(true)
@@ -922,9 +603,9 @@ export default function App() {
     void refreshFx()
   }, [])
 
-  /** Portfolio: auto-load CM Excel Master_DB bundled in /public/excel */
+  /** Excel Master_DB is the rate backend for Instant Quote */
   useEffect(() => {
-    if (quoteMode !== 'desk' || cmMaster) return
+    if (cmMaster) return
     let cancelled = false
     void (async () => {
       try {
@@ -944,7 +625,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [quoteMode, cmMaster])
+  }, [cmMaster])
 
   const volWeight = (cargo.length * cargo.width * cargo.height) / 6000
   const cw = Math.max(Number(cargo.weight) || 0, volWeight || 0)
@@ -973,6 +654,8 @@ export default function App() {
     }).sort((a, b) => a.total - b.total)
   }, [cw])
 
+  const bestPublic = quotes[0]
+
   const selectedDeskQuote = useMemo(() => {
     if (!quotes.length) return null
     return quotes.find((q) => q.code === deskCarrier) ?? quotes[0]
@@ -987,8 +670,10 @@ export default function App() {
       flags: deskFlags,
       slots,
       usdHkd,
+      overrides,
+      extraLines,
     })
-  }, [cw, selectedDeskQuote, deskFlags, slots, usdHkd])
+  }, [cw, selectedDeskQuote, deskFlags, slots, usdHkd, overrides, extraLines])
 
   const quoteValidUntil = useMemo(() => formatValidUntil(7), [showResult])
 
@@ -1120,6 +805,32 @@ export default function App() {
     }
   }
 
+  const handlePrintDeskPdf = () => {
+    if (!deskSheet || !selectedDeskQuote) return
+    const cbm =
+      (cargo.length * cargo.width * cargo.height) / 1_000_000
+    printQuotation(
+      buildDeskQuotationHtml({
+        origin,
+        destination,
+        length: cargo.length,
+        width: cargo.width,
+        height: cargo.height,
+        weight: Number(cargo.weight),
+        cw,
+        cbm,
+        carrierCode: selectedDeskQuote.code,
+        carrierName: selectedDeskQuote.name,
+        usdHkd,
+        remark: deskRemark,
+        validUntil: quoteValidUntil,
+        deskSheet,
+      }),
+    )
+    setToast('인쇄 창에서 대상: PDF로 저장')
+    window.setTimeout(() => setToast(''), 2800)
+  }
+
   const openDesk = () => {
     setQuoteMode('desk')
     if (!showResult) handleCalculate()
@@ -1127,185 +838,36 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-white font-sans text-wac-navy">
-      {/* HEADER */}
-      <header className="sticky top-0 z-50 border-b border-slate-200 bg-white">
-        <div className="mx-auto flex h-[64px] max-w-[1200px] items-center justify-between px-6 lg:px-8">
-          <a href="#top" className="shrink-0" aria-label="WAC Logistics home">
-            <WacLogo variant="color" className="h-8 sm:h-9" />
-          </a>
-          <nav className="hidden items-center gap-7 text-[13px] font-semibold text-wac-navy lg:flex">
-            {NAV.map((item) => (
-              <a
-                key={item.label}
-                href={item.href}
-                onClick={(e) => {
-                  if (item.href === '#desk') {
-                    e.preventDefault()
-                    openDesk()
-                    document.getElementById('quote')?.scrollIntoView({
-                      behavior: 'smooth',
-                    })
-                  }
-                }}
-                className="transition hover:text-wac-orange"
-              >
-                {item.label}
-              </a>
-            ))}
-          </nav>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                openDesk()
-                document.getElementById('quote')?.scrollIntoView({
-                  behavior: 'smooth',
-                })
-              }}
-              className="hidden items-center gap-1 rounded border border-slate-200 bg-white px-3 py-2 text-[12px] font-bold text-wac-navy transition hover:border-wac-orange hover:text-wac-orange sm:inline-flex"
-            >
-              <Lock className="h-3.5 w-3.5" />
-              Desk
-            </button>
-            <a
-              href="#quote"
-              onClick={() => setQuoteMode('public')}
-              className="inline-flex items-center gap-1 rounded bg-wac-orange px-3.5 py-2 text-[12px] font-bold text-white transition hover:bg-[#d9441c]"
-            >
-              Get Quote
-              <ChevronRight className="h-3.5 w-3.5" />
-            </a>
-          </div>
-        </div>
-      </header>
+      <SiteHeader />
 
-      <Hero />
-
-      {/* SOLUTIONS — light Pantos/WAC style: 3+2, split cards, ghost CTAs */}
-      <section id="solutions" className="border-t border-slate-200 bg-[#F4F7F9] py-20 sm:py-24">
-        <div className="mx-auto max-w-[1280px] px-6 lg:px-10">
-          <Reveal>
-            <div className="mb-12 max-w-2xl">
-              <p className="mb-3 text-[11px] font-bold tracking-[0.22em] text-wac-orange uppercase">
-                Solutions
-              </p>
-              <h2 className="font-display text-3xl font-extrabold tracking-tight text-wac-navy sm:text-4xl">
-                End-to-end freight across Asia
-              </h2>
-              <p className="mt-3 text-[15px] leading-relaxed text-slate-500">
-                Air opens Instant Quote on this site. Ocean, Road, Warehouse and
-                E-Commerce go to the official WAC / partner pages.
-              </p>
-            </div>
-          </Reveal>
-
-          {/* Row 1: 3 cards */}
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {SOLUTIONS.slice(0, 3).map((item, i) => (
-              <Reveal key={item.id} delay={i * 70}>
-                <a
-                  href={item.href}
-                  {...(item.external
-                    ? { target: '_blank', rel: 'noreferrer' }
-                    : {})}
-                  className="group flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-[0_8px_30px_-18px_rgba(26,42,58,0.25)] transition duration-300 hover:-translate-y-1 hover:border-wac-orange/35 hover:shadow-[0_20px_50px_-24px_rgba(240,80,35,0.35)]"
-                >
-                  <div className="relative aspect-[16/10] overflow-hidden bg-slate-100">
-                    <img
-                      src={item.cover}
-                      alt=""
-                      className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.04]"
-                    />
-                  </div>
-                  <div className="flex flex-1 flex-col p-5 sm:p-6">
-                    <h3 className="font-display text-lg font-extrabold text-wac-navy">
-                      {item.title}
-                    </h3>
-                    <p className="mt-2 flex-1 text-[13px] leading-relaxed text-slate-500">
-                      {item.desc}
-                    </p>
-                    <span className="mt-5 inline-flex w-fit items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2 text-[12px] font-bold text-wac-navy transition group-hover:border-wac-orange/40 group-hover:bg-orange-50 group-hover:text-wac-orange">
-                      {item.cta}
-                      {item.external ? (
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      ) : (
-                        <ArrowRight className="h-3.5 w-3.5" />
-                      )}
-                    </span>
-                  </div>
-                </a>
-              </Reveal>
-            ))}
-          </div>
-
-          {/* Row 2: 2 cards centered */}
-          <div className="mt-5 flex justify-center">
-            <div className="grid w-full grid-cols-1 gap-5 sm:grid-cols-2 lg:w-[66.666%]">
-              {SOLUTIONS.slice(3).map((item, i) => (
-                <Reveal key={item.id} delay={200 + i * 70}>
-                  <a
-                    href={item.href}
-                    {...(item.external
-                      ? { target: '_blank', rel: 'noreferrer' }
-                      : {})}
-                    className="group flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-[0_8px_30px_-18px_rgba(26,42,58,0.25)] transition duration-300 hover:-translate-y-1 hover:border-wac-orange/35 hover:shadow-[0_20px_50px_-24px_rgba(240,80,35,0.35)]"
-                  >
-                    <div className="relative aspect-[16/10] overflow-hidden bg-slate-100">
-                      <img
-                        src={item.cover}
-                        alt=""
-                        className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.04]"
-                      />
-                    </div>
-                    <div className="flex flex-1 flex-col p-5 sm:p-6">
-                      <h3 className="font-display text-lg font-extrabold text-wac-navy">
-                        {item.title}
-                      </h3>
-                      <p className="mt-2 flex-1 text-[13px] leading-relaxed text-slate-500">
-                        {item.desc}
-                      </p>
-                      <span className="mt-5 inline-flex w-fit items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2 text-[12px] font-bold text-wac-navy transition group-hover:border-wac-orange/40 group-hover:bg-orange-50 group-hover:text-wac-orange">
-                        {item.cta}
-                        {item.external ? (
-                          <ExternalLink className="h-3.5 w-3.5" />
-                        ) : (
-                          <ArrowRight className="h-3.5 w-3.5" />
-                        )}
-                      </span>
-                    </div>
-                  </a>
-                </Reveal>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* INSTANT QUOTE — same light family as Solutions */}
-      <section id="quote" className="border-t border-slate-200 bg-white py-20 sm:py-24">
+      {/* INSTANT QUOTE — Excel Master backend */}
+      <section
+        id="quote"
+        className="quote-dashboard border-t border-slate-200/80 pt-24 pb-16 sm:pt-28 sm:pb-20"
+      >
         <div id="desk" className="mx-auto max-w-[1280px] px-6 lg:px-10">
           <Reveal>
-          <div className="mb-10 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div className="mb-6 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-2xl">
               <p className="mb-2 text-[11px] font-bold tracking-[0.22em] text-wac-orange uppercase">
-                Core product
+                Digital freight desk
               </p>
               <h2 className="font-display text-3xl font-extrabold text-wac-navy sm:text-4xl lg:text-[42px]">
                 {quoteMode === 'public'
-                  ? 'Instant Air Freight Quote'
+                  ? 'Instant Air Quote'
                   : 'Origin Cost Desk'}
               </h2>
-              <p className="mt-3 text-[15px] leading-relaxed text-slate-600">
+              <p className="mt-2 text-[14px] leading-relaxed text-slate-600">
                 {quoteMode === 'public'
-                  ? 'Shipper / nominee — lane, chargeable weight, indicative air rates. Formal local & trucking confirmed on Desk.'
-                  : 'Internal desk — local master auto-calc + Cartage / Tunnel / Parking slots for formal origin cost.'}
+                  ? 'Indicative air from Excel Master_DB — chargeable weight and carrier compare.'
+                  : 'Master 자동 + 이 건 예외 + 줄 추가. Copy table / Save PDF.'}
               </p>
             </div>
-            <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+            <div className="inline-flex rounded-md border border-slate-200/90 bg-white/90 p-1 shadow-sm backdrop-blur-sm">
               <button
                 type="button"
                 onClick={() => setQuoteMode('public')}
-                className={`rounded-md px-4 py-2 text-[12px] font-bold transition ${
+                className={`rounded px-4 py-2 text-[12px] font-bold transition ${
                   quoteMode === 'public'
                     ? 'bg-wac-navy text-white'
                     : 'text-slate-500 hover:text-wac-navy'
@@ -1316,7 +878,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => openDesk()}
-                className={`inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-[12px] font-bold transition ${
+                className={`inline-flex items-center gap-1.5 rounded px-4 py-2 text-[12px] font-bold transition ${
                   quoteMode === 'desk'
                     ? 'bg-wac-orange text-white'
                     : 'text-slate-500 hover:text-wac-navy'
@@ -1327,16 +889,109 @@ export default function App() {
               </button>
             </div>
           </div>
+
+          {/* KPI strip — Desk dashboard chrome only (Public has its own quote card) */}
+          <div
+            className={`mb-8 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 sm:grid-cols-4 ${
+              quoteMode === 'public' ? 'hidden' : ''
+            }`}
+          >
+            <div className="bg-white px-4 py-3">
+              <p className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
+                Route
+              </p>
+              <p className="mt-0.5 font-display text-lg font-extrabold text-wac-navy">
+                {origin || '—'} → {destination || '—'}
+              </p>
+            </div>
+            <div className="bg-white px-4 py-3">
+              <p className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
+                Chargeable wt
+              </p>
+              <p className="mt-0.5 font-display text-lg font-extrabold text-emerald-700">
+                {cw > 0 ? `${cw.toFixed(1)} KGS` : '—'}
+              </p>
+            </div>
+            <div className="bg-white px-4 py-3">
+              <p className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
+                {quoteMode === 'desk' ? 'Formal total' : 'Best indicative'}
+              </p>
+              <p className="mt-0.5 font-display text-lg font-extrabold text-wac-navy">
+                {quoteMode === 'desk' && deskSheet && showResult
+                  ? `HKD ${deskSheet.totalHkd.toFixed(0)}`
+                  : showResult && bestPublic
+                    ? `USD ${bestPublic.total.toFixed(0)}`
+                    : cmQuote
+                      ? `USD ${cmQuote.total.toFixed(0)}`
+                      : '—'}
+              </p>
+            </div>
+            <div className="bg-wac-navy px-4 py-3">
+              <p className="text-[10px] font-bold tracking-wider text-white/50 uppercase">
+                TOTAL APPX
+              </p>
+              <p className="mt-0.5 font-display text-lg font-extrabold text-wac-orange">
+                {quoteMode === 'desk' && deskSheet && showResult
+                  ? `USD ${deskSheet.totalUsd.toFixed(2)}`
+                  : showResult && bestPublic
+                    ? `USD ${bestPublic.total.toFixed(2)}`
+                    : cmQuote
+                      ? `USD ${cmQuote.total.toFixed(2)}`
+                      : 'Calculate →'}
+              </p>
+            </div>
+          </div>
           </Reveal>
 
           <Reveal delay={120}>
-          <div className="grid grid-cols-12 gap-6">
+          {quoteMode === 'public' ? (
+            <PublicQuoteDHL
+              origin={origin}
+              destination={destination}
+              setOrigin={setOrigin}
+              setDestination={setDestination}
+              cargo={cargo}
+              updateCargo={updateCargo}
+              setCargo={setCargo}
+              cw={cw}
+              volWeight={volWeight}
+              showResult={showResult}
+              isLoading={isLoading}
+              formError={formError}
+              handleCalculate={handleCalculate}
+              quotes={quotes}
+              bestPublic={bestPublic}
+              quoteValidUntil={quoteValidUntil}
+              copied={copied}
+              handleRequestQuote={(c) => {
+                const full = quotes.find((q) => q.code === c.code)
+                if (full) handleRequestQuote(full)
+              }}
+              handleCopyEmailDraft={(c) => {
+                const full = quotes.find((q) => q.code === c.code)
+                if (full) void handleCopyEmailDraft(full)
+              }}
+              openDesk={openDesk}
+              setDeskCarrier={setDeskCarrier}
+              cmQuote={
+                cmQuote
+                  ? {
+                      total: cmQuote.total,
+                      route: cmQuote.route,
+                      breakLabel: cmQuote.breakLabel,
+                      cw: cmQuote.cw,
+                    }
+                  : null
+              }
+            />
+          ) : (
+          <div className="grid grid-cols-12 gap-5 lg:gap-6">
             <div className="col-span-12 lg:col-span-4">
-              <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="mb-5 flex items-center gap-2 border-b border-slate-100 pb-4">
+              <div className="rounded-lg border border-slate-200/90 bg-white/95 p-5 shadow-sm backdrop-blur-sm">
+                <div className="mb-4 flex items-center gap-2 border-b border-slate-100 pb-3">
                   <Box className="h-5 w-5 text-wac-orange" />
-                  <h3 className="text-lg font-bold text-wac-navy">
-                    Cargo Details
+                  <h3 className="text-[15px] font-bold text-wac-navy">
+                    Cargo input
                   </h3>
                 </div>
 
@@ -1452,32 +1107,138 @@ export default function App() {
                           />
                         </div>
                       ))}
+
+                      <div className="border-t border-orange-100 pt-3">
+                        <p className="mb-2 text-[10px] font-bold tracking-wider text-wac-navy uppercase">
+                          Master 예외 (이 건만 덮어쓰기)
+                        </p>
+                        <p className="mb-2 text-[11px] leading-relaxed text-slate-500">
+                          비워 두면 Master 자동. Handling 321처럼 계정 예외는 여기.
+                        </p>
+                        {ALWAYS_ON_LOCAL.map((c) => {
+                          const auto = calcLineAmount(c, cw)
+                          return (
+                            <div key={c.id} className="mb-2">
+                              <label className="mb-1 flex items-center justify-between text-[10px] font-bold tracking-wider text-slate-400 uppercase">
+                                <span>{c.label}</span>
+                                <span className="font-semibold normal-case text-slate-400">
+                                  auto {auto.toFixed(2)}
+                                </span>
+                              </label>
+                              <input
+                                type="number"
+                                min={0}
+                                step={0.01}
+                                placeholder={`Auto ${auto.toFixed(2)}`}
+                                value={overrideDraft[c.id] ?? ''}
+                                onChange={(e) => {
+                                  const raw = e.target.value
+                                  setOverrideDraft((d) => ({ ...d, [c.id]: raw }))
+                                  const n = Number(raw)
+                                  setOverrides((o) => {
+                                    const next = { ...o }
+                                    if (raw.trim() === '' || !Number.isFinite(n)) {
+                                      delete next[c.id]
+                                    } else {
+                                      next[c.id] = n
+                                    }
+                                    return next
+                                  })
+                                }}
+                                className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-wac-orange focus:ring-1 focus:ring-wac-orange"
+                              />
+                            </div>
+                          )
+                        })}
+                      </div>
+
+                      <div className="border-t border-orange-100 pt-3">
+                        <div className="mb-2 flex items-center justify-between">
+                          <p className="text-[10px] font-bold tracking-wider text-wac-navy uppercase">
+                            항목 추가 (Other)
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExtraLines((rows) => [
+                                ...rows,
+                                {
+                                  id: `extra-${Date.now()}`,
+                                  label: '',
+                                  amount: 0,
+                                },
+                              ])
+                            }
+                            className="inline-flex items-center gap-1 text-[10px] font-bold tracking-wide text-wac-orange uppercase hover:underline"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            Add line
+                          </button>
+                        </div>
+                        {extraLines.length === 0 && (
+                          <p className="text-[11px] text-slate-400">
+                            RE-PACK, KEEP COOL, Strapping 등 이 건만 있는 줄.
+                          </p>
+                        )}
+                        {extraLines.map((row) => (
+                          <div key={row.id} className="mb-2 flex gap-2">
+                            <input
+                              type="text"
+                              placeholder="Charge name"
+                              value={row.label}
+                              onChange={(e) =>
+                                setExtraLines((rows) =>
+                                  rows.map((r) =>
+                                    r.id === row.id
+                                      ? { ...r, label: e.target.value }
+                                      : r,
+                                  ),
+                                )
+                              }
+                              className="h-10 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-wac-orange"
+                            />
+                            <input
+                              type="number"
+                              min={0}
+                              placeholder="HKD"
+                              value={row.amount || ''}
+                              onChange={(e) =>
+                                setExtraLines((rows) =>
+                                  rows.map((r) =>
+                                    r.id === row.id
+                                      ? { ...r, amount: Number(e.target.value) }
+                                      : r,
+                                  ),
+                                )
+                              }
+                              className="h-10 w-24 rounded-lg border border-slate-200 bg-white px-2 text-sm font-medium outline-none focus:border-wac-orange"
+                            />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExtraLines((rows) =>
+                                  rows.filter((r) => r.id !== row.id),
+                                )
+                              }
+                              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-400 hover:border-red-300 hover:text-red-500"
+                              aria-label="Remove line"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+
                       <div>
                         <label className="mb-1 block text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-                          Other label
+                          Remark (PDF)
                         </label>
                         <input
                           type="text"
-                          value={slots.otherLabel}
-                          onChange={(e) =>
-                            setSlots({ ...slots, otherLabel: e.target.value })
-                          }
-                          className="mb-2 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-wac-orange"
-                        />
-                        <label className="mb-1 block text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-                          Other amount (HKD)
-                        </label>
-                        <input
-                          type="number"
-                          min={0}
-                          value={slots.other}
-                          onChange={(e) =>
-                            setSlots({
-                              ...slots,
-                              other: Number(e.target.value),
-                            })
-                          }
-                          className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium outline-none focus:border-wac-orange"
+                          value={deskRemark}
+                          onChange={(e) => setDeskRemark(e.target.value)}
+                          placeholder="KEEP COOL / 2–8°C …"
+                          className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-wac-orange"
                         />
                       </div>
                       <div>
@@ -1548,18 +1309,20 @@ export default function App() {
                   )}
 
                   {quoteMode === 'desk' && (
-                    <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/80 p-4">
-                      <div className="flex items-center gap-2">
-                        <FileSpreadsheet className="h-4 w-4 text-wac-navy" />
-                        <p className="text-[11px] font-bold tracking-wider text-wac-navy uppercase">
-                          CM Excel Master link
-                        </p>
-                      </div>
+                    <details className="group rounded-lg border border-slate-200 bg-slate-50/80">
+                      <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-[11px] font-bold tracking-wider text-wac-navy uppercase">
+                        <FileSpreadsheet className="h-4 w-4" />
+                        CM Excel Master
+                        <span className="ml-auto font-semibold text-slate-400 normal-case">
+                          {cmMaster
+                            ? `${cmMaster.air.length} routes`
+                            : 'optional'}
+                        </span>
+                      </summary>
+                      <div className="space-y-3 border-t border-slate-200 px-4 py-3">
                       <p className="text-[11px] leading-relaxed text-slate-500">
-                        Import the same Master_DB used in the CM quotation
-                        workbook. Route must match a master key (e.g. ICN-HKG).
-                        Portfolio demo — company deliverable remains the Excel
-                        file.
+                        Same Master_DB as the CM workbook. Portfolio link —
+                        company deliverable remains Excel.
                       </p>
                       <div className="flex flex-wrap gap-2">
                         <a
@@ -1623,8 +1386,8 @@ export default function App() {
                       )}
                       {cmMaster && !cmQuote && (
                         <p className="text-[11px] text-amber-700">
-                          No Master rate for {origin}-{destination}. Try ICN-HKG
-                          or ICN-LAX.
+                          No Master rate for {origin}-{destination}. Try ICN-HKG,
+                          ICN-SIN, ICN-NRT, …
                         </p>
                       )}
                       {cmQuote && (
@@ -1639,7 +1402,8 @@ export default function App() {
                           </span>
                         </p>
                       )}
-                    </div>
+                      </div>
+                    </details>
                   )}
 
                   {formError && (
@@ -1668,7 +1432,7 @@ export default function App() {
                       </>
                     )}
                   </button>
-                </div>
+        </div>
               </div>
             </div>
 
@@ -1746,7 +1510,7 @@ export default function App() {
                   )}
                   <div className="rounded-xl border border-orange-200 bg-orange-50 p-5">
                     <div className="flex flex-wrap items-start justify-between gap-4">
-                      <div>
+        <div>
                         <p className="mb-1 text-[11px] font-bold tracking-wider text-wac-orange">
                           FORMAL ORIGIN COST
                         </p>
@@ -1811,9 +1575,10 @@ export default function App() {
                             </option>
                           ))}
                         </select>
-                      </div>
-                      <button
-                        type="button"
+        </div>
+        <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
                         onClick={handleCopyDeskSheet}
                         className="inline-flex items-center gap-2 rounded-lg border-2 border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 transition hover:border-wac-orange hover:text-wac-orange"
                       >
@@ -1822,9 +1587,18 @@ export default function App() {
                         ) : (
                           <Copy className="h-4 w-4" />
                         )}
-                        {copied === 'desk' ? 'Copied!' : 'Copy Cost Sheet'}
-                      </button>
-                    </div>
+                        {copied === 'desk' ? 'Copied!' : 'Copy table'}
+        </button>
+        <button
+          type="button"
+                        onClick={handlePrintDeskPdf}
+                        className="inline-flex items-center gap-2 rounded-lg bg-wac-navy px-3.5 py-2 text-xs font-bold text-white transition hover:bg-[#243447]"
+                      >
+                        <Printer className="h-4 w-4" />
+                        Save PDF
+        </button>
+        </div>
+        </div>
 
                     <div className="overflow-hidden rounded-lg border border-slate-100">
                       <table className="w-full text-left text-[13px]">
@@ -1871,428 +1645,29 @@ export default function App() {
                       </table>
                     </div>
                     <p className="mt-3 text-[10px] text-slate-400">
-                      * Desk mode for WAC staff. Public shippers only see
-                      indicative air rates — they do not enter Cartage / Tunnel /
-                      Parking.
+                      * Exception fills override Master for this job. Add line = Excel Other. Save PDF → print dialog → PDF로 저장.
                     </p>
                   </div>
                 </div>
               ) : (
-                <div className="space-y-4">
-                  <div className="rounded-xl border border-blue-200 bg-blue-50 p-5">
-                    <div className="flex flex-wrap items-start justify-between gap-4">
-                      <div>
-                        <p className="mb-1 text-[11px] font-bold tracking-wider text-blue-500">
-                          APPLIED CHARGEABLE WEIGHT
-                        </p>
-                        <p className="text-2xl font-black text-blue-900">
-                          {cw.toFixed(1)} KGS
-                        </p>
-                        <p className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-blue-700">
-                          {origin}
-                          <Plane className="h-3 w-3" />
-                          {destination}
-                          <span className="font-medium text-blue-500">
-                            · {quotes.length} options
-                          </span>
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap items-end gap-6 text-right">
-                        <div>
-                          <p className="mb-0.5 text-[10px] font-bold text-slate-400 uppercase">
-                            Gross
-                          </p>
-                          <p className="text-sm font-bold text-slate-700">
-                            {Number(cargo.weight).toFixed(1)} kg
-                          </p>
-                        </div>
-                        <div>
-                          <p className="mb-0.5 text-[10px] font-bold text-slate-400 uppercase">
-                            Volumetric
-                          </p>
-                          <p className="text-sm font-bold text-slate-700">
-                            {volWeight.toFixed(1)} kg
-                          </p>
-                        </div>
-                        <div>
-                          <p className="mb-0.5 text-[10px] font-bold text-slate-400 uppercase">
-                            Quote Valid Until
-                          </p>
-                          <p className="text-sm font-bold text-blue-800">
-                            {quoteValidUntil}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="max-h-[640px] space-y-3 overflow-y-auto pr-1">
-                    {quotes.map((q, index) => (
-                      <div
-                        key={q.code}
-                        className="rounded-xl border border-slate-200 bg-white p-5 transition hover:shadow-lg"
-                      >
-                        <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
-                          <div className="flex items-center gap-4">
-                            <AirlineLogo
-                              code={q.code}
-                              name={q.name}
-                              color={q.color}
-                              logoSrc={'logoSrc' in q ? q.logoSrc : undefined}
-                            />
-                            <div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <h4 className="text-[16px] font-extrabold text-wac-navy">
-                                  {q.name}
-                                </h4>
-                                <span className="rounded bg-wac-navy px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-white">
-                                  {q.code}
-                                </span>
-                                <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
-                                  AWB {q.prefix}
-                                </span>
-                                {index === 0 && (
-                                  <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
-                                    BEST VALUE
-                                  </span>
-                                )}
-                              </div>
-                              <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500">
-                                <span className="font-bold text-slate-700">
-                                  {origin}
-                                </span>
-                                <Plane className="h-3 w-3 text-slate-400" />
-                                <span className="font-bold text-slate-700">
-                                  {destination}
-                                </span>
-                                <span className="text-slate-300">|</span>
-                                Hub {q.hub}
-                                <span className="text-slate-300">|</span>
-                                {q.schedule}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="min-w-[150px] text-right">
-                            <p className="mb-1 text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-                              Indicative Air
-                            </p>
-                            <p
-                              className={`font-display text-2xl font-black ${
-                                index === 0 ? 'text-wac-orange' : 'text-wac-navy'
-                              }`}
-                            >
-                              <span className="mr-1 text-sm font-semibold text-slate-400">
-                                USD
-                              </span>
-                              {q.total.toFixed(2)}
-                            </p>
-                            <CostBreakdownBar
-                              baseAmount={q.base}
-                              surchargeAmount={q.surcharge}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50 p-3.5">
-                          <div className="flex flex-wrap gap-5 text-[12px]">
-                            <span className="flex flex-col">
-                              <span className="text-[10px] font-bold text-slate-400 uppercase">
-                                Rate
-                              </span>
-                              <span className="font-semibold text-slate-700">
-                                ${q.ratePerKg.toFixed(2)}/kg
-                              </span>
-                            </span>
-                            <span className="flex flex-col">
-                              <span className="text-[10px] font-bold text-slate-400 uppercase">
-                                MYC
-                              </span>
-                              <span className="font-semibold text-slate-700">
-                                ${q.fuelPerKg.toFixed(2)}/kg
-                              </span>
-                            </span>
-                            {q.extraPerKg > 0 && (
-                              <span className="flex flex-col">
-                                <span className="text-[10px] font-bold text-slate-400 uppercase">
-                                  {q.extraLabel || 'Extra'}
-                                </span>
-                                <span className="font-semibold text-slate-700">
-                                  ${q.extraPerKg.toFixed(2)}/kg
-                                </span>
-                              </span>
-                            )}
-                            <span className="flex flex-col">
-                              <span className="text-[10px] font-bold text-slate-400 uppercase">
-                                CG Fee
-                              </span>
-                              <span className="font-semibold text-slate-700">
-                                ${q.cgFee.toFixed(2)}
-                              </span>
-                            </span>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => handleRequestQuote(q)}
-                              className="flex items-center gap-1.5 rounded-lg bg-wac-navy px-3.5 py-2 text-xs font-bold text-white transition hover:bg-[#24384c]"
-                            >
-                              Request Quote
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setDeskCarrier(q.code)
-                                openDesk()
-                              }}
-                              className="flex items-center gap-1.5 rounded-lg border border-orange-200 bg-orange-50 px-3.5 py-2 text-xs font-bold text-wac-orange transition hover:bg-orange-100"
-                              title="Open desk cost sheet with this carrier"
-                            >
-                              <Lock className="h-3.5 w-3.5" />
-                              Open in Desk
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleCopyEmailDraft(q)}
-                              className="flex items-center gap-2 rounded-lg border-2 border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 transition hover:border-wac-orange hover:text-wac-orange"
-                              title="WAC desk: copy table-format email draft"
-                            >
-                              {copied === q.code ? (
-                                <CheckCircle2 className="h-4 w-4 text-green-600" />
-                              ) : (
-                                <Copy className="h-4 w-4" />
-                              )}
-                              {copied === q.code
-                                ? 'Copied!'
-                                : 'Copy Email Draft'}
-                            </button>
-                          </div>
-                        </div>
-                        <p className="mt-2.5 text-[10px] text-slate-400">
-                          * Indicative air only — excludes HK cartage / tunnel /
-                          parking. Shippers: Request Quote. Desk: Open in Desk
-                          for formal origin cost.
-                        </p>
-                      </div>
-                    ))}
-                  </div>
+                <div className="flex h-full min-h-[420px] flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white/70 p-12">
+                  <Plane className="mb-4 h-8 w-8 text-slate-300" />
+                  <h4 className="mb-1 text-lg font-bold text-slate-700">
+                    Ready for origin cost
+                  </h4>
+                  <p className="max-w-sm text-center text-sm text-slate-500">
+                    Enter cargo details and variable slots, then calculate.
+                  </p>
                 </div>
               )}
             </div>
           </div>
+          )}
           </Reveal>
         </div>
       </section>
 
-      {/* NETWORK & OFFICES */}
-      <section id="network" className="bg-white py-20 sm:py-28">
-        <div className="mx-auto max-w-[1280px] px-6 lg:px-10">
-          <div className="grid items-center gap-10 lg:grid-cols-12 lg:gap-14">
-            <Reveal className="lg:col-span-4">
-              <p className="mb-3 text-[11px] font-bold tracking-[0.22em] text-wac-orange uppercase">
-                Network & Offices
-              </p>
-              <h2 className="font-display mb-4 text-3xl font-extrabold tracking-tight text-wac-navy sm:text-4xl lg:text-[42px]">
-                Asia coverage that
-                <br />
-                moves with you
-              </h2>
-              <p className="mb-8 max-w-sm text-[15px] leading-relaxed text-slate-500">
-                Local desks across Korea, Hong Kong, China and ASEAN — one
-                operating cadence from origin cartage to airline uplift.
-              </p>
-              <ul className="space-y-5 border-t border-slate-200 pt-6">
-                {NETWORK.map((n) => (
-                  <li key={n.city}>
-                    <p className="text-[15px] font-bold text-wac-navy">
-                      {n.city}
-                    </p>
-                    <p className="mt-0.5 text-[13px] font-medium text-slate-600">
-                      {n.focus}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            </Reveal>
-
-            <Reveal className="lg:col-span-8" delay={100}>
-              <div className="relative overflow-hidden rounded-[1.25rem] shadow-[0_32px_80px_-28px_rgba(26,42,58,0.55)]">
-                <img
-                  src="/network-hub.jpg"
-                  alt="WAC Asia cargo gateway"
-                  className="aspect-[16/10] h-full w-full object-cover"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-wac-navy/80 via-wac-navy/10 to-transparent" />
-                <div className="absolute right-0 bottom-0 left-0 p-6 sm:p-8">
-                  <p className="text-[11px] font-bold tracking-[0.2em] text-wac-orange uppercase">
-                    Gateway strength
-                  </p>
-                  <p className="mt-2 max-w-md text-[17px] font-semibold text-white sm:text-lg">
-                    HKG hub linked to Korea, China and ASEAN corridors.
-                  </p>
-                </div>
-              </div>
-            </Reveal>
-          </div>
-        </div>
-      </section>
-
-      {/* ABOUT */}
-      <section id="about" className="relative overflow-hidden bg-wac-navy py-28 sm:py-32">
-        <div className="absolute inset-0">
-          <img
-            src="/hero-cargo-takeoff.png"
-            alt=""
-            className="h-full w-full object-cover object-[center_40%] opacity-35"
-          />
-          <div className="absolute inset-0 bg-gradient-to-r from-wac-navy via-wac-navy/80 to-wac-navy/50" />
-        </div>
-        <div className="relative z-10 mx-auto max-w-[1200px] px-6 lg:px-8">
-          <Reveal>
-            <p className="mb-4 text-[11px] font-bold tracking-[0.22em] text-wac-orange uppercase">
-              About WAC
-            </p>
-            <h2 className="font-display max-w-3xl text-3xl leading-tight font-extrabold text-white sm:text-4xl lg:text-[44px]">
-              Building trust to deliver value
-              <br />
-              throughout Asia — and beyond.
-            </h2>
-            <p className="mt-6 max-w-2xl text-[16px] leading-relaxed text-white/70">
-              WAC Int&apos;l Logistics connects shippers, airlines and destination
-              partners across Asia. This portfolio site wraps Instant Quote and
-              Freight Desk in the same brand language as waclogistics.com.
-            </p>
-            <div className="mt-10 flex flex-wrap gap-3">
-              <a
-                href={WAC_SITE}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-2 rounded bg-white px-5 py-3 text-[13px] font-bold text-wac-navy transition hover:bg-orange-50"
-              >
-                Visit waclogistics.com
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-              <a
-                href="#quote"
-                className="inline-flex items-center gap-2 rounded border border-white/40 px-5 py-3 text-[13px] font-bold text-white transition hover:bg-white/10"
-              >
-                Try Instant Quote
-                <ArrowRight className="h-4 w-4" />
-              </a>
-            </div>
-          </Reveal>
-        </div>
-      </section>
-
-      {/* W NETWORKS */}
-      <section id="w-networks" className="border-t border-slate-200 bg-[#F7F9FB] py-16 sm:py-20">
-        <div className="mx-auto max-w-[1200px] px-6 lg:px-8">
-          <Reveal>
-            <div className="mb-10 text-center">
-              <p className="mb-2 text-[11px] font-bold tracking-[0.22em] text-wac-orange uppercase">
-                Family sites
-              </p>
-              <h2 className="font-display text-2xl font-extrabold tracking-wide text-wac-navy sm:text-3xl">
-                W NETWORKS
-              </h2>
-              <p className="mx-auto mt-3 max-w-lg text-[14px] text-slate-500">
-                Sister brands in the W ecosystem — separate from freight Solutions
-                above.
-              </p>
-            </div>
-          </Reveal>
-
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-5 md:gap-5">
-            {W_NETWORKS.map((net, i) => (
-              <Reveal key={net.name} delay={i * 50}>
-                <a
-                  href={net.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="group flex flex-col items-center rounded-2xl border border-slate-200 bg-white p-5 text-center shadow-sm transition hover:-translate-y-1 hover:border-wac-orange/40 hover:shadow-lg"
-                >
-                  <div className="mb-4 flex h-24 w-full items-center justify-center overflow-hidden rounded-lg bg-slate-50">
-                    <img
-                      src={net.logo}
-                      alt={net.name}
-                      className="h-full w-full object-contain p-3"
-                    />
-                  </div>
-                  <h4 className="text-[12px] font-bold text-wac-navy transition-colors group-hover:text-wac-orange sm:text-[13px]">
-                    {net.name}
-                  </h4>
-                  <p className="mt-1 text-[10px] font-bold tracking-wide text-slate-400">
-                    {net.desc}
-                  </p>
-                </a>
-              </Reveal>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* FOOTER */}
-      <footer id="contact" className="bg-wac-navy">
-        <div className="mx-auto grid max-w-[1200px] gap-10 px-6 py-14 sm:grid-cols-2 lg:grid-cols-4 lg:px-8">
-          <div>
-            <WacLogo variant="white" className="h-7" />
-            <p className="mt-4 text-[12px] leading-relaxed text-white/50">
-              WAC Int&apos;l Logistics Co., Ltd.
-              <br />
-              Delivering Asia, Delivering Trust.
-            </p>
-          </div>
-          <div>
-            <h4 className="mb-3 text-[12px] font-bold tracking-wider text-white uppercase">
-              Solutions
-            </h4>
-            <ul className="space-y-2 text-[13px] text-white/55">
-              <li>Air Freight</li>
-              <li>Ocean Freight</li>
-              <li>Road Freight</li>
-              <li>Warehousing</li>
-              <li>E-Commerce</li>
-            </ul>
-          </div>
-          <div>
-            <h4 className="mb-3 text-[12px] font-bold tracking-wider text-white uppercase">
-              Company
-            </h4>
-            <ul className="space-y-2 text-[13px] text-white/55">
-              <li>About Us</li>
-              <li>History</li>
-              <li>Newsroom</li>
-              <li>Careers</li>
-            </ul>
-          </div>
-          <div>
-            <h4 className="mb-3 text-[12px] font-bold tracking-wider text-white uppercase">
-              Contact
-            </h4>
-            <ul className="space-y-2 text-[13px] text-white/55">
-              <li>Service Inquiries</li>
-              <li>Become a Partner</li>
-              <li>
-                <a
-                  href="#quote"
-                  className="font-semibold text-wac-orange hover:underline"
-                >
-                  Instant Quote Desk
-                </a>
-              </li>
-            </ul>
-          </div>
-        </div>
-        <div className="border-t border-white/10">
-          <div className="mx-auto flex max-w-[1200px] flex-wrap items-center justify-between gap-3 px-6 py-4 lg:px-8">
-            <p className="text-[11px] text-white/40">
-              © WAC Int&apos;l Logistics Co., Ltd. All Rights Reserved.
-            </p>
-            <p className="text-[11px] text-white/35">
-              Digital Freight Desk · Prototype
-            </p>
-          </div>
-        </div>
-      </footer>
+      <SiteFooter />
 
       {toast && (
         <div className="toast-in fixed bottom-5 left-1/2 z-50 rounded-lg bg-wac-navy px-4 py-2.5 text-[12px] font-semibold text-white shadow-lg">
@@ -2300,5 +1675,16 @@ export default function App() {
         </div>
       )}
     </div>
+  )
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<HomePage />} />
+      <Route path="/quote" element={<QuoteWorkspace />} />
+      <Route path="/track" element={<TrackPage />} />
+      <Route path="/desk" element={<Navigate to="/quote?mode=desk" replace />} />
+    </Routes>
   )
 }

@@ -35,3 +35,16 @@ docs/보고서-캡처/*pdf추출*
 # Excel lock files
 ~$*.xlsx
 excel-quote/~$*.xlsx
+
+# Presentation drafts (local only)
+*.pptx
+docs/pitch-assets/
+docs/manus-ppt/images/
+docs/manus-ppt/*.html
+
+# Excel scratch copies / generated PDFs
+excel-quote/WAC_Air_Quotation_Simulator (2).xlsx
+excel-quote/WAC_Air_Quotation_Simulator_v2.xlsx
+excel-quote/_audit_report.txt
+excel-quote/*.pdf
+public/excel/*.pdf

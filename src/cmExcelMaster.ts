@@ -8,6 +8,7 @@ import * as XLSX from 'xlsx'
 export type CmAirRate = {
   route: string
   min: number
+  rUnder45: number
   r45: number
   r100: number
   r500: number
@@ -76,31 +77,52 @@ export function parseCmMasterFromWorkbook(
   }) as unknown[][]
 
   const air: CmAirRate[] = []
-  for (const r of [15, 16]) {
-    const route = String(cell(rows, r, 0) ?? '').trim()
-    if (!route) continue
-    air.push({
-      route,
-      min: num(cell(rows, r, 1)),
-      r45: num(cell(rows, r, 2)),
-      r100: num(cell(rows, r, 3)),
-      r500: num(cell(rows, r, 4)),
-      r1000: num(cell(rows, r, 5)),
-      fsc: num(cell(rows, r, 6)),
-      ssc: num(cell(rows, r, 7)),
-    })
+  // Find ROUTE header then read consecutive data rows
+  let airHeader = -1
+  for (let r = 0; r < rows.length; r++) {
+    if (String(cell(rows, r, 0) ?? '').trim().toUpperCase() === 'ROUTE') {
+      airHeader = r
+      break
+    }
+  }
+  if (airHeader >= 0) {
+    for (let r = airHeader + 1; r < rows.length; r++) {
+      const route = String(cell(rows, r, 0) ?? '').trim()
+      if (!route || route.startsWith('2.') || route.includes('Local')) break
+      if (!route.includes('-')) break
+      air.push({
+        route,
+        min: num(cell(rows, r, 1)),
+        rUnder45: num(cell(rows, r, 2)),
+        r45: num(cell(rows, r, 3)),
+        r100: num(cell(rows, r, 4)),
+        r500: num(cell(rows, r, 5)),
+        r1000: num(cell(rows, r, 6)),
+        fsc: num(cell(rows, r, 7)),
+        ssc: num(cell(rows, r, 8)),
+      })
+    }
   }
 
   const local: CmLocalRate[] = []
-  for (const r of [20, 21, 22]) {
-    const item = String(cell(rows, r, 0) ?? '').trim()
-    if (!item) continue
-    local.push({
-      item,
-      unit: String(cell(rows, r, 1) ?? ''),
-      rate: num(cell(rows, r, 2)),
-      min: num(cell(rows, r, 3)),
-    })
+  let localHeader = -1
+  for (let r = 0; r < rows.length; r++) {
+    if (String(cell(rows, r, 0) ?? '').trim() === 'Charge Item') {
+      localHeader = r
+      break
+    }
+  }
+  if (localHeader >= 0) {
+    for (let r = localHeader + 1; r < rows.length; r++) {
+      const item = String(cell(rows, r, 0) ?? '').trim()
+      if (!item || item.startsWith('구간') || item.startsWith('행')) break
+      local.push({
+        item,
+        unit: String(cell(rows, r, 1) ?? ''),
+        rate: num(cell(rows, r, 2)),
+        min: num(cell(rows, r, 3)),
+      })
+    }
   }
 
   if (!air.length) {
@@ -154,7 +176,10 @@ export function calcCmQuote(
 
   let breakLabel = '+45'
   let airRate = air.r45
-  if (cw >= master.wb1000) {
+  if (cw < master.wb45) {
+    breakLabel = '-45'
+    airRate = air.rUnder45
+  } else if (cw >= master.wb1000) {
     breakLabel = '+1000'
     airRate = air.r1000
   } else if (cw >= master.wb500) {
