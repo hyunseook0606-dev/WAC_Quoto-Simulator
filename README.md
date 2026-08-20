@@ -62,6 +62,22 @@ excel-quote/               optional Python engine (sanity / future API)
 
 History and the current draft live in **browser localStorage only**. They are not on the server and not shared across PCs.
 
+## Verification (ICN-HKG)
+
+After changing Master or quote logic, run:
+
+```bash
+npm run verify:cases
+```
+
+| Case | Input | Expect |
+|------|-------|--------|
+| **A** Volume | 110×110×150 cm × 3 PLT, GW 400 kg | C.W. ≈ 909 kg (+500 @ $3.20) |
+| **B** Heavy | 30×30×30 cm × 1, GW 80 kg | C.W. = 80 kg (+45 @ $4.50) |
+| **C** MIN | 20×20×20 cm × 1, GW 3 kg | Air ≥ $50 MIN, Trucking ≥ $80 MIN |
+
+Route: **ICN-HKG** (USD). Script: `scripts/verify-icn-hkg-cases.mts`.
+
 ## Deploy (static)
 
 ```bash
