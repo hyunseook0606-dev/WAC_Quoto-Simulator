@@ -22,7 +22,7 @@ Node 22+ recommended.
 
 ## Daily workflow
 
-1. **Master_DB** — yellow cells are live rates (air breaks, local charges). Same as Excel Master_DB.
+1. **Master_DB** — yellow cells are live rates. Add/rename airline routes. Weight-break **columns** are not hardcoded: add +300 / +2000 / FLAT, or Reset GCR. Edits persist in this browser (`localStorage`); Import xlsx or Reload Excel default replaces them.
 2. **Input** — cargo, route, 비용 내역. Local charge **names** come from Master. Edit **unit** and **참고** by hand. **예외(J)** overrides 참고.
 3. Repeat cases: **Pin this case** once (e.g. Chocolate KEEP COOL). Next time click it at the top of Input, change only cargo / 예외 / remark, then Save PDF.
 4. **Save PDF** also writes history in this browser (`localStorage`). Same case is upserted, not duplicated.
@@ -33,7 +33,7 @@ Node 22+ recommended.
 - CBM = L × W × H × Qty / 1,000,000
 - Volume kg = CBM × 167
 - C.W. = max(gross, volume kg)
-- Break: -45 / +45 / +100 / +500 / +1000 from Master weight breaks
+- Break: highest Master weight-break whose min kg ≤ C.W. Default GCR is -45 / +45 / +100 / +500 / +1000; add +300, +2000, or FLAT in Master if the contract needs it
 - Air freight = max(rate × C.W., MIN); FSC/SSC = per kg × C.W.
 - Local: CBM / KG|C.W. / BL|ENTRY / PLT / else max(rate, min)
 - Currency from Master `CUR`. If **HKD**, TOTAL × Ex.Rate. If **USD**, Ex.Rate is ignored.

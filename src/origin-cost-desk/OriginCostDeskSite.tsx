@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, Fragment, type ClipboardEvent as ReactClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import * as XLSX from 'xlsx'
 import { FileSpreadsheet, Loader2, Pin, Plus, Search, Trash2 } from 'lucide-react'
 import { CmMasterEditor, NumericCell } from './components/CmMasterEditor'
@@ -8,6 +8,8 @@ import {
   type CmCargoPiece,
 } from './cmDeskQuote'
 import {
+  isPersistedMaster,
+  normalizeMaster,
   parseCmMasterFromWorkbook,
   parseCmMasterFile,
   type CmMaster,
@@ -16,7 +18,7 @@ import { filterLinesForPdf } from './cmDeskPdf'
 import { buildCmDeskPlainTable, buildCmDeskQuotationHtml } from './cmDeskDocument'
 import { printQuotation } from '../quoteDocument'
 import { type CmExtraOther } from './cmDeskConfig'
-import { patchAirRoute } from './cmMasterEdit'
+import { addAirRoute, patchAirRoute } from './cmMasterEdit'
 
 type TabKey = 'master' | 'input' | 'quote'
 type CargoPieceDraft = {
@@ -99,6 +101,12 @@ function cargoDimsText(pieces: CargoPieceDraft[]): string {
         }`,
     )
     .join(' · ')
+}
+
+function chunkPairs<T>(items: T[]): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < items.length; i += 2) out.push(items.slice(i, i + 2))
+  return out
 }
 
 function historySearchBlob(item: QuoteHistoryItem): string {
@@ -217,6 +225,7 @@ export function OriginCostDeskSite() {
 
   const HISTORY_KEY = 'origin-cost-desk.quote-history.v1'
   const DRAFT_KEY = 'origin-cost-desk.draft.v1'
+  const MASTER_KEY = 'origin-cost-desk.master.v2'
   const [quoteHistory, setQuoteHistory] = useState<QuoteHistoryItem[]>([])
   const [historyQuery, setHistoryQuery] = useState('')
   const [historyShowAdvanced, setHistoryShowAdvanced] = useState(false)
@@ -240,6 +249,7 @@ export function OriginCostDeskSite() {
   const cellRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const historyHydratedRef = useRef(false)
   const draftHydratedRef = useRef(false)
+  const masterHydratedRef = useRef(false)
 
   const [routePickerOpen, setRoutePickerOpen] = useState(false)
   const routePickerWrapRef = useRef<HTMLDivElement | null>(null)
@@ -247,14 +257,36 @@ export function OriginCostDeskSite() {
   useEffect(() => {
     void (async () => {
       try {
+        const raw = localStorage.getItem(MASTER_KEY)
+        if (raw) {
+          const parsed = JSON.parse(raw) as unknown
+          if (isPersistedMaster(parsed)) {
+            const saved = normalizeMaster(parsed)
+            setMaster(saved)
+            setCmImportMsg(
+              `Saved Master · ${saved.breaks.map((b) => b.label).join(' / ')} · ${saved.air.length} routes`,
+            )
+            masterHydratedRef.current = true
+            return
+          }
+        }
+      } catch {
+        // fall through to workbook
+      }
+      try {
         const res = await fetch('/excel/WAC_Air_Quotation_Simulator.xlsx')
         if (!res.ok) return
         const buf = await res.arrayBuffer()
         const wb = XLSX.read(buf, { type: 'array' })
-        setMaster(parseCmMasterFromWorkbook(wb, 'WAC_Air_Quotation_Simulator.xlsx'))
+        const next = normalizeMaster(
+          parseCmMasterFromWorkbook(wb, 'WAC_Air_Quotation_Simulator.xlsx'),
+        )
+        setMaster(next)
         setCmImportMsg('')
       } catch {
         // ignore
+      } finally {
+        masterHydratedRef.current = true
       }
     })()
   }, [])
@@ -322,6 +354,15 @@ export function OriginCostDeskSite() {
       // ignore
     }
   }, [quoteHistory])
+
+  useEffect(() => {
+    if (!masterHydratedRef.current || !master) return
+    try {
+      localStorage.setItem(MASTER_KEY, JSON.stringify(master))
+    } catch {
+      // ignore
+    }
+  }, [master])
 
   useEffect(() => {
     if (!draftHydratedRef.current) return
@@ -1417,6 +1458,36 @@ export function OriginCostDeskSite() {
                 >
                   Import Master_DB
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void (async () => {
+                      try {
+                        const res = await fetch('/excel/WAC_Air_Quotation_Simulator.xlsx')
+                        if (!res.ok) throw new Error('Excel not found')
+                        const buf = await res.arrayBuffer()
+                        const wb = XLSX.read(buf, { type: 'array' })
+                        const next = normalizeMaster(
+                          parseCmMasterFromWorkbook(
+                            wb,
+                            'WAC_Air_Quotation_Simulator.xlsx',
+                          ),
+                        )
+                        setMaster(next)
+                        setCmImportMsg(
+                          `Reloaded Excel default · ${next.breaks.map((b) => b.label).join(' / ')} · ${next.air.length} routes`,
+                        )
+                      } catch (err) {
+                        setCmImportMsg(
+                          err instanceof Error ? err.message : 'Reload failed',
+                        )
+                      }
+                    })()
+                  }}
+                  className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-[11px] font-bold text-slate-700 hover:border-wac-orange"
+                >
+                  Reload Excel default
+                </button>
                 <input
                   ref={cmFileRef}
                   type="file"
@@ -1428,10 +1499,10 @@ export function OriginCostDeskSite() {
                     if (!file) return
                     void (async () => {
                       try {
-                        const next = await parseCmMasterFile(file)
+                        const next = normalizeMaster(await parseCmMasterFile(file))
                         setMaster(next)
                         setCmImportMsg(
-                          `Loaded ${next.air.length} routes · ${next.local.length} local charges`,
+                          `Loaded ${next.air.length} routes · ${next.breaks.map((b) => b.label).join(' / ')} · ${next.local.length} local charges`,
                         )
                       } catch (err) {
                         setCmImportMsg(
@@ -1615,9 +1686,21 @@ export function OriginCostDeskSite() {
                             ref={(el) => {
                               cellRefs.current.route = el
                             }}
-                            className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 font-bold uppercase shadow-sm outline-none focus:border-wac-orange text-center cursor-pointer"
-                            value={`${origin}-${destination}`}
-                            readOnly
+                            className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 font-bold uppercase shadow-sm outline-none focus:border-wac-orange text-center"
+                            value={`${origin}${destination ? `-${destination}` : ''}`}
+                            onChange={(e) => {
+                              const v = e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, '')
+                              const dash = v.indexOf('-')
+                              if (dash < 0) {
+                                setOrigin(v.slice(0, 8))
+                                setDestination('')
+                                return
+                              }
+                              setOrigin(v.slice(0, dash).slice(0, 8))
+                              setDestination(
+                                v.slice(dash + 1).replace(/-/g, '').slice(0, 8),
+                              )
+                            }}
                             onFocus={() => setRoutePickerOpen(true)}
                             onClick={() => setRoutePickerOpen(true)}
                             onKeyDown={(e) =>
@@ -1655,6 +1738,21 @@ export function OriginCostDeskSite() {
                                   </button>
                                 )
                               })}
+                              {master.air.every((a) => a.route !== routeKey) &&
+                              origin &&
+                              destination ? (
+                                <button
+                                  type="button"
+                                  onMouseDown={(ev) => ev.preventDefault()}
+                                  onClick={() => {
+                                    setMaster(addAirRoute(master, { route: routeKey }))
+                                    setRoutePickerOpen(false)
+                                  }}
+                                  className="w-full border-t border-slate-100 px-3 py-2 text-left text-[11px] font-bold text-wac-orange hover:bg-orange-50"
+                                >
+                                  Add {routeKey} to Master
+                                </button>
+                              ) : null}
                             </div>
                           ) : null}
                         </div>
@@ -1923,61 +2021,82 @@ export function OriginCostDeskSite() {
                           </span>
                         )}
                       </td>
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">-45</th>
-                      <td className="bg-[#FFFBEA] px-2 py-2">
-                        {routeRow ? (
-                          <NumericCell
-                            value={routeRow.rUnder45}
-                            onCommit={(n) => patchSelectedRoute({ rUnder45: n })}
-                            className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center font-bold outline-none focus:border-wac-orange"
-                          />
-                        ) : null}
-                      </td>
+                      {master?.breaks[0] ? (
+                        <>
+                          <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">
+                            {master.breaks[0].label}
+                          </th>
+                          <td
+                            className={`px-2 py-2 ${
+                              deskQuote?.breakLabel === master.breaks[0].label
+                                ? 'bg-emerald-50'
+                                : 'bg-[#FFFBEA]'
+                            }`}
+                          >
+                            {routeRow ? (
+                              <NumericCell
+                                value={routeRow.rates[0] ?? 0}
+                                onCommit={(n) => {
+                                  const rates = [...routeRow.rates]
+                                  rates[0] = n
+                                  patchSelectedRoute({ rates })
+                                }}
+                                className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center font-bold outline-none focus:border-wac-orange"
+                              />
+                            ) : null}
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <th className="bg-[#F4F7FB] px-3 py-3" />
+                          <td className="bg-white px-2 py-2" />
+                        </>
+                      )}
                     </tr>
-                    <tr className="border-t border-slate-200">
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">+45</th>
-                      <td className="bg-[#FFFBEA] px-2 py-2">
-                        {routeRow ? (
-                          <NumericCell
-                            value={routeRow.r45}
-                            onCommit={(n) => patchSelectedRoute({ r45: n })}
-                            className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center font-bold outline-none focus:border-wac-orange"
-                          />
-                        ) : null}
-                      </td>
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">+100</th>
-                      <td className="bg-[#FFFBEA] px-2 py-2">
-                        {routeRow ? (
-                          <NumericCell
-                            value={routeRow.r100}
-                            onCommit={(n) => patchSelectedRoute({ r100: n })}
-                            className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center font-bold outline-none focus:border-wac-orange"
-                          />
-                        ) : null}
-                      </td>
-                    </tr>
-                    <tr className="border-t border-slate-200">
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">+500</th>
-                      <td className="bg-[#FFFBEA] px-2 py-2">
-                        {routeRow ? (
-                          <NumericCell
-                            value={routeRow.r500}
-                            onCommit={(n) => patchSelectedRoute({ r500: n })}
-                            className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center font-bold outline-none focus:border-wac-orange"
-                          />
-                        ) : null}
-                      </td>
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">+1000</th>
-                      <td className="bg-[#FFFBEA] px-2 py-2">
-                        {routeRow ? (
-                          <NumericCell
-                            value={routeRow.r1000}
-                            onCommit={(n) => patchSelectedRoute({ r1000: n })}
-                            className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center font-bold outline-none focus:border-wac-orange"
-                          />
-                        ) : null}
-                      </td>
-                    </tr>
+                    {chunkPairs(master?.breaks.slice(1) ?? []).map((pair, rowIdx) => {
+                      const base = 1 + rowIdx * 2
+                      return (
+                        <tr
+                          key={pair.map((b) => b.id).join('-')}
+                          className="border-t border-slate-200"
+                        >
+                          {pair.map((b, j) => {
+                            const bi = base + j
+                            const active = deskQuote?.breakLabel === b.label
+                            return (
+                              <Fragment key={b.id}>
+                                <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">
+                                  {b.label}
+                                </th>
+                                <td
+                                  className={`px-2 py-2 ${
+                                    active ? 'bg-emerald-50' : 'bg-[#FFFBEA]'
+                                  }`}
+                                >
+                                  {routeRow ? (
+                                    <NumericCell
+                                      value={routeRow.rates[bi] ?? 0}
+                                      onCommit={(n) => {
+                                        const rates = [...routeRow.rates]
+                                        rates[bi] = n
+                                        patchSelectedRoute({ rates })
+                                      }}
+                                      className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center font-bold outline-none focus:border-wac-orange"
+                                    />
+                                  ) : null}
+                                </td>
+                              </Fragment>
+                            )
+                          })}
+                          {pair.length === 1 ? (
+                            <>
+                              <th className="bg-[#F4F7FB] px-3 py-3" />
+                              <td className="bg-white px-2 py-2" />
+                            </>
+                          ) : null}
+                        </tr>
+                      )
+                    })}
                     <tr className="border-t border-slate-200">
                       <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">FSC/kg</th>
                       <td className="bg-[#FFFBEA] px-2 py-2">

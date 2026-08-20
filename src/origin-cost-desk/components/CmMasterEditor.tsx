@@ -4,10 +4,14 @@ import type { CmAirRate, CmMaster } from '../cmExcelMaster'
 import {
   addAirRoute,
   addLocalCharge,
+  addWeightBreak,
   patchAirRoute,
   patchLocalRate,
+  patchWeightBreak,
   removeAirRoute,
   removeLocalCharge,
+  removeWeightBreak,
+  resetGcrBreaks,
 } from '../cmMasterEdit'
 
 export function NumericCell({
@@ -55,6 +59,7 @@ type Props = {
 
 export function CmMasterEditor({ master, onChange }: Props) {
   const cellRefs = useRef<Record<string, HTMLInputElement | HTMLSelectElement | null>>({})
+  const [newBreakKg, setNewBreakKg] = useState('300')
 
   const focusCell = (id?: string) => {
     if (!id) return
@@ -111,36 +116,119 @@ export function CmMasterEditor({ master, onChange }: Props) {
     onChange(patchLocalRate(master, i, patch))
   }
 
+  const rateCellId = (row: number, breakIdx: number) => `air-${row}-r${breakIdx}`
+
+  const addBreakFromDraft = () => {
+    const n = Number(newBreakKg)
+    onChange(addWeightBreak(master, Number.isFinite(n) ? n : 300))
+  }
+
   return (
     <div className="space-y-4">
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <p className="px-4 pt-4 text-[10px] font-bold tracking-wider text-wac-navy uppercase">
-            Air routes (Master_DB)
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-3 px-4 pt-4">
+          <div>
+            <p className="text-[10px] font-bold tracking-wider text-wac-navy uppercase">
+              Air routes (Master_DB)
+            </p>
+            <p className="mt-1 max-w-2xl text-[11px] leading-relaxed text-slate-500">
+              Default GCR breaks are -45 / +45 / +100 / +500 / +1000. Add +300, +2000,
+              or a single FLAT column for contract rates. Route codes are editable.
+            </p>
+          </div>
           <button
             type="button"
             onClick={() => onChange(addAirRoute(master))}
-            className="mr-4 inline-flex items-center gap-1 text-[10px] font-bold text-wac-orange uppercase hover:underline"
+            className="inline-flex items-center gap-1 text-[10px] font-bold text-wac-orange uppercase hover:underline"
           >
             <Plus className="h-3 w-3" />
             Add route
           </button>
         </div>
-        <div className="overflow-x-auto border-t border-slate-100">
+
+        <div className="mx-4 mt-3 flex flex-wrap items-end gap-2 rounded-xl bg-slate-50 px-3 py-2">
+          <label className="text-[10px] font-bold tracking-wider text-slate-500 uppercase">
+            New break (kg)
+            <input
+              type="text"
+              inputMode="numeric"
+              value={newBreakKg}
+              onChange={(e) => setNewBreakKg(e.target.value.replace(/[^\d.]/g, ''))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  addBreakFromDraft()
+                }
+              }}
+              className="mt-1 block h-8 w-24 rounded border border-slate-200 bg-white px-2 text-[11px] font-bold outline-none focus:border-wac-orange"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={addBreakFromDraft}
+            className="inline-flex h-8 items-center gap-1 rounded-lg bg-wac-navy px-3 text-[10px] font-bold text-white uppercase"
+          >
+            <Plus className="h-3 w-3" />
+            Add column
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange(addWeightBreak(master, 0))}
+            className="inline-flex h-8 items-center rounded-lg border border-slate-200 bg-white px-3 text-[10px] font-bold text-slate-700 uppercase"
+          >
+            Add FLAT
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange(resetGcrBreaks(master))}
+            className="inline-flex h-8 items-center rounded-lg border border-slate-200 bg-white px-3 text-[10px] font-bold text-slate-700 uppercase"
+          >
+            Reset GCR
+          </button>
+        </div>
+
+        <div className="mt-3 overflow-x-auto border-t border-slate-100">
           <table className="w-full min-w-[820px] text-left text-[11px]">
             <thead>
               <tr className="bg-[#1A2A3A] text-[9px] font-bold uppercase tracking-wider text-white/80">
-                <th className="px-2 py-2">Route</th>
-                <th className="px-2 py-2">MIN</th>
-                <th className="px-2 py-2">-45</th>
-                <th className="px-2 py-2">+45</th>
-                <th className="px-2 py-2">+100</th>
-                <th className="px-2 py-2">+500</th>
-                <th className="px-2 py-2">+1000</th>
-                <th className="px-2 py-2">FSC</th>
-                <th className="px-2 py-2">SSC</th>
-                <th className="min-w-[78px] px-2 py-2">CUR</th>
+                <th className="px-2 py-2 align-bottom">Route</th>
+                <th className="px-2 py-2 align-bottom">MIN</th>
+                {master.breaks.map((br, bi) => (
+                  <th key={br.id} className="min-w-[88px] px-2 py-2">
+                    <input
+                      type="text"
+                      value={br.label}
+                      onChange={(e) =>
+                        onChange(patchWeightBreak(master, bi, { label: e.target.value }))
+                      }
+                      className="mb-1 h-6 w-full rounded border border-white/20 bg-white/10 px-1 text-center text-[10px] font-bold uppercase text-white outline-none focus:border-wac-orange"
+                    />
+                    <div className="flex items-center gap-1">
+                      <NumericCell
+                        value={br.minKg}
+                        onCommit={(n) =>
+                          onChange(patchWeightBreak(master, bi, { minKg: n }))
+                        }
+                        className="h-6 w-full rounded border border-white/20 bg-white/10 px-1 text-center text-[10px] text-white outline-none focus:border-wac-orange"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => onChange(removeWeightBreak(master, bi))}
+                        disabled={master.breaks.length <= 1}
+                        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-white/70 hover:text-red-300 disabled:opacity-30"
+                        aria-label={`Remove ${br.label}`}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                    <p className="mt-0.5 text-center text-[8px] font-semibold normal-case tracking-normal text-white/50">
+                      ≥ {br.minKg}kg
+                    </p>
+                  </th>
+                ))}
+                <th className="px-2 py-2 align-bottom">FSC</th>
+                <th className="px-2 py-2 align-bottom">SSC</th>
+                <th className="min-w-[78px] px-2 py-2 align-bottom">CUR</th>
                 <th className="w-8 px-1 py-2" />
               </tr>
             </thead>
@@ -167,38 +255,103 @@ export function CmMasterEditor({ master, onChange }: Props) {
                       className="h-8 w-full min-w-[80px] rounded border border-yellow-100 bg-yellow-50 px-1.5 text-[11px] font-bold uppercase outline-none focus:border-wac-orange"
                     />
                   </td>
-                  {(
-                    [
-                      'min',
-                      'rUnder45',
-                      'r45',
-                      'r100',
-                      'r500',
-                      'r1000',
-                      'fsc',
-                      'ssc',
-                    ] as const
-                  ).map((key, colIdx, keys) => (
-                    <td key={key} className="px-2 py-1.5">
+                  <td className="px-2 py-1.5">
+                    <NumericCell
+                      inputRef={(el) => {
+                        cellRefs.current[`air-${i}-min`] = el
+                      }}
+                      value={row.min}
+                      onCommit={(n) => patchAir(i, { min: n })}
+                      onKeyDown={(e) =>
+                        handleNav(e, {
+                          enter: `air-${i + 1 < master.air.length ? i + 1 : 0}-min`,
+                          down: `air-${i + 1 < master.air.length ? i + 1 : 0}-min`,
+                          up: `air-${i - 1 >= 0 ? i - 1 : master.air.length - 1}-min`,
+                          left: `air-${i}-route`,
+                          right: rateCellId(i, 0),
+                        })
+                      }
+                      className="h-8 w-full min-w-[52px] rounded border border-yellow-100 bg-yellow-50 px-1.5 text-[11px] font-medium outline-none focus:border-wac-orange"
+                    />
+                  </td>
+                  {master.breaks.map((br, bi) => (
+                    <td key={br.id} className="px-2 py-1.5">
                       <NumericCell
                         inputRef={(el) => {
-                          cellRefs.current[`air-${i}-${key}`] = el
+                          cellRefs.current[rateCellId(i, bi)] = el
                         }}
-                        value={row[key]}
-                        onCommit={(n) => patchAir(i, { [key]: n })}
+                        value={row.rates[bi] ?? 0}
+                        onCommit={(n) => {
+                          const rates = [...row.rates]
+                          rates[bi] = n
+                          patchAir(i, { rates })
+                        }}
                         onKeyDown={(e) =>
                           handleNav(e, {
-                            enter: `air-${i + 1 < master.air.length ? i + 1 : 0}-${key}`,
-                            down: `air-${i + 1 < master.air.length ? i + 1 : 0}-${key}`,
-                            up: `air-${i - 1 >= 0 ? i - 1 : master.air.length - 1}-${key}`,
-                            left: colIdx === 0 ? `air-${i}-route` : `air-${i}-${keys[colIdx - 1]}`,
-                            right: colIdx === keys.length - 1 ? `air-${i}-currency` : `air-${i}-${keys[colIdx + 1]}`,
+                            enter: rateCellId(
+                              i + 1 < master.air.length ? i + 1 : 0,
+                              bi,
+                            ),
+                            down: rateCellId(
+                              i + 1 < master.air.length ? i + 1 : 0,
+                              bi,
+                            ),
+                            up: rateCellId(
+                              i - 1 >= 0 ? i - 1 : master.air.length - 1,
+                              bi,
+                            ),
+                            left:
+                              bi === 0
+                                ? `air-${i}-min`
+                                : rateCellId(i, bi - 1),
+                            right:
+                              bi === master.breaks.length - 1
+                                ? `air-${i}-fsc`
+                                : rateCellId(i, bi + 1),
                           })
                         }
                         className="h-8 w-full min-w-[52px] rounded border border-yellow-100 bg-yellow-50 px-1.5 text-[11px] font-medium outline-none focus:border-wac-orange"
                       />
                     </td>
                   ))}
+                  <td className="px-2 py-1.5">
+                    <NumericCell
+                      inputRef={(el) => {
+                        cellRefs.current[`air-${i}-fsc`] = el
+                      }}
+                      value={row.fsc}
+                      onCommit={(n) => patchAir(i, { fsc: n })}
+                      onKeyDown={(e) =>
+                        handleNav(e, {
+                          enter: `air-${i + 1 < master.air.length ? i + 1 : 0}-fsc`,
+                          down: `air-${i + 1 < master.air.length ? i + 1 : 0}-fsc`,
+                          up: `air-${i - 1 >= 0 ? i - 1 : master.air.length - 1}-fsc`,
+                          left: rateCellId(i, master.breaks.length - 1),
+                          right: `air-${i}-ssc`,
+                        })
+                      }
+                      className="h-8 w-full min-w-[52px] rounded border border-yellow-100 bg-yellow-50 px-1.5 text-[11px] font-medium outline-none focus:border-wac-orange"
+                    />
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <NumericCell
+                      inputRef={(el) => {
+                        cellRefs.current[`air-${i}-ssc`] = el
+                      }}
+                      value={row.ssc}
+                      onCommit={(n) => patchAir(i, { ssc: n })}
+                      onKeyDown={(e) =>
+                        handleNav(e, {
+                          enter: `air-${i + 1 < master.air.length ? i + 1 : 0}-ssc`,
+                          down: `air-${i + 1 < master.air.length ? i + 1 : 0}-ssc`,
+                          up: `air-${i - 1 >= 0 ? i - 1 : master.air.length - 1}-ssc`,
+                          left: `air-${i}-fsc`,
+                          right: `air-${i}-currency`,
+                        })
+                      }
+                      className="h-8 w-full min-w-[52px] rounded border border-yellow-100 bg-yellow-50 px-1.5 text-[11px] font-medium outline-none focus:border-wac-orange"
+                    />
+                  </td>
                   <td className="min-w-[78px] px-2 py-1.5">
                     <select
                       ref={(el) => {
@@ -362,8 +515,9 @@ export function CmMasterEditor({ master, onChange }: Props) {
       </div>
 
       <p className="text-[10px] leading-relaxed text-slate-500">
-        Excel Master_DB 노란칸과 동일하게 여기서 수정하면 Desk 견적·참고(Master)에 즉시
-        반영됩니다. Import xlsx로 다시 불러도 됩니다.
+        Break columns and routes stay in this browser until you Import xlsx or Reload
+        Excel default. Highest matching kg wins (e.g. C.W. 220 uses +100, not +45).
+        Flat rate: keep one FLAT column at 0kg and remove the others.
       </p>
     </div>
   )

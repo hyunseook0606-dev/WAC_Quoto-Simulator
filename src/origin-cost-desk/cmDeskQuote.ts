@@ -2,6 +2,7 @@
  * Excel 입력 시트: Master 참고(I) + 예외(J) → TOTAL
  */
 import type { CmLocalRate, CmMaster } from './cmExcelMaster'
+import { pickWeightBreak, rateForBreak } from './cmExcelMaster'
 import { type CmExtraOther } from './cmDeskConfig'
 
 export type CmDeskLine = {
@@ -83,28 +84,6 @@ export function localLineId(item: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '')}`
-}
-
-function pickAirRate(
-  air: CmMaster['air'][number],
-  breakLabel: string,
-): number {
-  const map: Record<string, number> = {
-    '-45': air.rUnder45,
-    '+45': air.r45,
-    '+100': air.r100,
-    '+500': air.r500,
-    '+1000': air.r1000,
-  }
-  return map[breakLabel] ?? air.r45
-}
-
-function breakForCw(cw: number, master: CmMaster): string {
-  if (cw < master.wb45) return '-45'
-  if (cw >= master.wb1000) return '+1000'
-  if (cw >= master.wb500) return '+500'
-  if (cw >= master.wb100) return '+100'
-  return '+45'
 }
 
 function useAmount(
@@ -202,8 +181,9 @@ export function calcCmDeskQuote(
     : (input.length * input.width * input.height * input.qty) / master.cbmDivisor
   const volumetric = cbm * master.volFactor
   const cw = Math.max(gross, volumetric)
-  const breakLabel = breakForCw(cw, master)
-  const airRate = pickAirRate(air, breakLabel)
+  const picked = pickWeightBreak(cw, master.breaks)
+  const breakLabel = picked?.label ?? ''
+  const airRate = picked ? rateForBreak(air, master.breaks, picked.id) : 0
   const currency = air.currency ?? 'USD'
   const ctx = { cw, cbm, bl, qty: totalQty }
 
