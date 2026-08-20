@@ -126,6 +126,18 @@ export function rateForBreak(
   return air.rates[i] ?? 0
 }
 
+export function isPersistedMaster(value: unknown): value is CmMaster {
+  if (!value || typeof value !== 'object') return false
+  const m = value as Partial<CmMaster>
+  return (
+    Array.isArray(m.breaks) &&
+    m.breaks.length > 0 &&
+    Array.isArray(m.air) &&
+    m.air.length > 0 &&
+    Array.isArray(m.local)
+  )
+}
+
 export function normalizeMaster(master: CmMaster): CmMaster {
   const raw = master.breaks?.length ? master.breaks : DEFAULT_GCR_BREAKS
   const byKg = new Map<number, { break: CmWeightBreak; sourceIndex: number }>()

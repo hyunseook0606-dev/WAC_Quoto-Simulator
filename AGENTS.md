@@ -17,7 +17,7 @@ Port **5174**. Open `/origin-cost-desk`.
 - `public/excel/WAC_Air_Quotation_Simulator.xlsx` — Master_DB source
 - HKD lanes: TOTAL × Ex.Rate. USD lanes leave TOTAL as-is.
 - Pin repeat cases in Input; Save PDF auto-saves history in localStorage.
-- Master routes and weight breaks are editable in-session. Deployed rates come from `public/excel/WAC_Air_Quotation_Simulator.xlsx` (no browser Master save / reset).
+- Master routes and weight breaks are editable; saved per browser (`origin-cost-desk.master.v2`). Bundled Excel is first-load default only.
 
 ## Cursor Cloud specific instructions
 

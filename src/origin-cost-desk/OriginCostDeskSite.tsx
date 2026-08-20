@@ -8,6 +8,7 @@ import {
   type CmCargoPiece,
 } from './cmDeskQuote'
 import {
+  isPersistedMaster,
   normalizeMaster,
   parseCmMasterFromWorkbook,
   parseCmMasterFile,
@@ -224,6 +225,7 @@ export function OriginCostDeskSite() {
 
   const HISTORY_KEY = 'origin-cost-desk.quote-history.v1'
   const DRAFT_KEY = 'origin-cost-desk.draft.v1'
+  const MASTER_KEY = 'origin-cost-desk.master.v2'
   const [quoteHistory, setQuoteHistory] = useState<QuoteHistoryItem[]>([])
   const [historyQuery, setHistoryQuery] = useState('')
   const [historyShowAdvanced, setHistoryShowAdvanced] = useState(false)
@@ -247,12 +249,30 @@ export function OriginCostDeskSite() {
   const cellRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const historyHydratedRef = useRef(false)
   const draftHydratedRef = useRef(false)
+  const masterHydratedRef = useRef(false)
 
   const [routePickerOpen, setRoutePickerOpen] = useState(false)
   const routePickerWrapRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     void (async () => {
+      try {
+        const raw = localStorage.getItem(MASTER_KEY)
+        if (raw) {
+          const parsed = JSON.parse(raw) as unknown
+          if (isPersistedMaster(parsed)) {
+            const saved = normalizeMaster(parsed)
+            setMaster(saved)
+            setCmImportMsg(
+              `Master loaded from this browser · ${saved.air.length} routes · edit yellow cells anytime`,
+            )
+            masterHydratedRef.current = true
+            return
+          }
+        }
+      } catch {
+        // fall through to bundled Excel default
+      }
       try {
         const res = await fetch('/excel/WAC_Air_Quotation_Simulator.xlsx')
         if (!res.ok) return
@@ -262,9 +282,13 @@ export function OriginCostDeskSite() {
           parseCmMasterFromWorkbook(wb, 'WAC_Air_Quotation_Simulator.xlsx'),
         )
         setMaster(next)
-        setCmImportMsg('')
+        setCmImportMsg(
+          'Default Master from Excel — yellow cells are editable; changes stay in this browser',
+        )
       } catch {
         // ignore
+      } finally {
+        masterHydratedRef.current = true
       }
     })()
   }, [])
@@ -332,6 +356,15 @@ export function OriginCostDeskSite() {
       // ignore
     }
   }, [quoteHistory])
+
+  useEffect(() => {
+    if (!masterHydratedRef.current || !master) return
+    try {
+      localStorage.setItem(MASTER_KEY, JSON.stringify(master))
+    } catch {
+      // ignore
+    }
+  }, [master])
 
   useEffect(() => {
     if (!draftHydratedRef.current) return

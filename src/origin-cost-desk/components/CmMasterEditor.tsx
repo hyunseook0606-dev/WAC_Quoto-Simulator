@@ -509,9 +509,8 @@ export function CmMasterEditor({ master, onChange }: Props) {
       </div>
 
       <p className="text-[10px] leading-relaxed text-slate-500">
-        Change the <strong>from (kg)</strong> threshold to add contract tiers (+300, +2000).
-        Grey hint updates with it. Duplicate kg is ignored. Master comes from the bundled Excel
-        on deploy — use Import Master_DB to replace from a file.
+        Yellow cells save automatically in this browser (local + cloud). Excel file is
+        only the first-load default. Use Import Master_DB to load a file from disk.
       </p>
     </div>
   )
