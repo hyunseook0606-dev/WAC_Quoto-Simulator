@@ -23,6 +23,7 @@ import { filterLinesForPdf } from './cmDeskPdf'
 import { buildCmDeskPlainTable, buildCmDeskQuotationHtml } from './cmDeskDocument'
 import { printQuotation } from '../quoteDocument'
 import { type CmExtraOther } from './cmDeskConfig'
+import { handleArrowNav, selectAllFocusProps } from './deskInputUx'
 import { addAirRoute } from './cmMasterEdit'
 
 type TabKey = 'master' | 'input' | 'quote'
@@ -127,6 +128,9 @@ function caseFingerprint(item: {
   exceptionDraft: Record<string, string>
   deskRemark: string
   extraOthers: CmExtraOther[]
+  fx?: number
+  blCount?: number
+  carrierCode?: string
 }): string {
   return [
     item.consignee.trim().toUpperCase(),
@@ -136,6 +140,9 @@ function caseFingerprint(item: {
     JSON.stringify(item.exceptionDraft),
     item.deskRemark.trim().toUpperCase(),
     item.extraOthers.map((row) => row.label).join(','),
+    String(item.fx ?? ''),
+    String(item.blCount ?? ''),
+    String(item.carrierCode ?? '').toUpperCase(),
   ].join('|')
 }
 
@@ -427,6 +434,14 @@ export function OriginCostDeskSite() {
     const heightValue = Number(piece.height) || 0
     const qtyValue = Math.max(0, Number(piece.qty) || 0)
     const grossValue = Number(piece.gross) || 0
+    const complete =
+      lengthValue > 0 &&
+      widthValue > 0 &&
+      heightValue > 0 &&
+      qtyValue > 0 &&
+      grossValue > 0
+    const cbmValue =
+      (lengthValue * widthValue * heightValue * qtyValue) / 1_000_000
     return {
       ...piece,
       lengthValue,
@@ -434,12 +449,12 @@ export function OriginCostDeskSite() {
       heightValue,
       qtyValue,
       grossValue,
-      cbmValue:
-        (lengthValue * widthValue * heightValue * qtyValue) / 1_000_000,
-      cwValue: Math.max(
-        grossValue,
-        ((lengthValue * widthValue * heightValue * qtyValue) / 1_000_000) * 167,
-      ),
+      complete,
+      cbmValue: complete ? cbmValue : 0,
+      // Only show C.W. when the piece is included in the quote (matches engine filter).
+      cwValue: complete
+        ? Math.max(grossValue, cbmValue * 167)
+        : 0,
     }
   })
   const detailQty = normalizedCargoPieces.reduce((sum, piece) => sum + piece.qty, 0)
@@ -450,11 +465,10 @@ export function OriginCostDeskSite() {
     0,
   )
   const usingDetailedCargo = normalizedCargoPieces.length > 0
-  const cargoQty = usingDetailedCargo ? detailQty : qty
-  const cargoGross = usingDetailedCargo ? detailGross : weight
-  const cargoCbm = usingDetailedCargo
-    ? detailCbm
-    : (length * width * height * qty) / 1_000_000
+  // Do not fall back to hidden chocolate defaults when the cargo grid is empty.
+  const cargoQty = usingDetailedCargo ? detailQty : 0
+  const cargoGross = usingDetailedCargo ? detailGross : 0
+  const cargoCbm = usingDetailedCargo ? detailCbm : 0
   const cargoSummary = usingDetailedCargo
     ? normalizedCargoPieces
         .map(
@@ -462,10 +476,36 @@ export function OriginCostDeskSite() {
             `${index + 1}) ${piece.length} x ${piece.width} x ${piece.height} cm / ${piece.qty} pcs / ${piece.gross.toFixed(1)} kg`,
         )
         .join(' ; ')
-    : `${length} x ${width} x ${height} cm / ${qty} pcs / ${weight.toFixed(1)} kg`
+    : 'No cargo entered'
+
+  const routeKey = `${origin.trim().toUpperCase()}-${destination.trim().toUpperCase()}`
+  const routeInMaster = Boolean(
+    master?.air.some((a) => a.route === routeKey),
+  )
 
   const deskQuote = useMemo(() => {
     if (!master) return null
+    if (!usingDetailedCargo) {
+      // Empty grid: quote with zero cargo (MIN floors still apply) — not ghost sample dims.
+      return calcCmDeskQuote(master, {
+        origin,
+        destination,
+        length: 0,
+        width: 0,
+        height: 0,
+        qty: 0,
+        gross: 0,
+        pieces: [],
+        blCount,
+        fx,
+        exceptions: parseCmExceptions(exceptionDraft),
+        refOverrides: parseCmExceptions(refDraft),
+        otherLabels,
+        otherUnits,
+        extraOthers,
+        disabledLineIds: disabledFixedOtherIds,
+      })
+    }
     return calcCmDeskQuote(master, {
       origin,
       destination,
@@ -495,6 +535,7 @@ export function OriginCostDeskSite() {
     weight,
     blCount,
     fx,
+    usingDetailedCargo,
     normalizedCargoPieces,
     exceptionDraft,
     refDraft,
@@ -537,31 +578,10 @@ export function OriginCostDeskSite() {
       right?: string
     },
   ) => {
-    if (event.key === 'Enter') {
-      event.preventDefault()
-      if (nav.enter) focusCell(nav.enter)
-      return
-    }
-    if (event.key === 'ArrowUp' && nav.up) {
-      event.preventDefault()
-      focusCell(nav.up)
-      return
-    }
-    if (event.key === 'ArrowDown' && nav.down) {
-      event.preventDefault()
-      focusCell(nav.down)
-      return
-    }
-    if (event.key === 'ArrowLeft' && nav.left) {
-      event.preventDefault()
-      focusCell(nav.left)
-      return
-    }
-    if (event.key === 'ArrowRight' && nav.right) {
-      event.preventDefault()
-      focusCell(nav.right)
-    }
+    handleArrowNav(event, nav, focusCell)
   }
+
+  const selectAll = selectAllFocusProps()
 
   const handleCargoPaste =
     (startIndex: number) =>
@@ -709,12 +729,12 @@ export function OriginCostDeskSite() {
       const cbm = (L * W * H * Q) / 1_000_000
       const cw = Math.max(GW, cbm * 167)
 
-      // Excel PDF shows Gross as rounded (e.g. 194.5 → 195)
+      // Same precision as Input (not rounded).
       return {
         index: i + 1,
-        dimensionsText: `${Math.round(L)} x ${Math.round(W)} x ${Math.round(H)}`,
+        dimensionsText: `${L} x ${W} x ${H}`,
         qtyText: `${Q}`,
-        grossText: `${Math.round(GW)}`,
+        grossText: Number.isInteger(GW) ? String(GW) : GW.toFixed(1),
         cbmText: cbm.toFixed(3),
         cwText: cw.toFixed(2),
       }
@@ -765,9 +785,9 @@ export function OriginCostDeskSite() {
 
       return {
         index: i + 1,
-        dimensionsText: `${Math.round(L)} x ${Math.round(W)} x ${Math.round(H)}`,
+        dimensionsText: `${L} x ${W} x ${H}`,
         qtyText: `${Q}`,
-        grossText: `${Math.round(GW)}`,
+        grossText: Number.isInteger(GW) ? String(GW) : GW.toFixed(1),
         cbmText: cbm.toFixed(3),
         cwText: cw.toFixed(2),
       }
@@ -822,7 +842,12 @@ export function OriginCostDeskSite() {
       caseName: opts?.pin ? name : undefined,
     }
 
-    const fp = caseFingerprint(item)
+    const fp = caseFingerprint({
+      ...item,
+      fx: Number(item.fxDraft) || 1,
+      blCount: item.blCount,
+      carrierCode: item.carrierCode,
+    })
 
     setQuoteHistory((prev) => {
       if (opts?.pin) {
@@ -1032,6 +1057,12 @@ export function OriginCostDeskSite() {
   }
 
   const deleteQuoteFromHistory = (id: string) => {
+    const row = quoteHistory.find((item) => item.id === id)
+    const label =
+      row?.caseName?.trim() ||
+      row?.consignee ||
+      (row ? `${row.origin}-${row.destination}` : 'this case')
+    if (!window.confirm(`Delete history entry “${label}”?`)) return
     setQuoteHistory((prev) => prev.filter((item) => item.id !== id))
   }
 
@@ -1044,8 +1075,7 @@ export function OriginCostDeskSite() {
   const chargeableWeight = cargoCbm * 167
   const effectiveCw = usingDetailedCargo
     ? pieceMetrics.reduce((sum, piece) => sum + (piece.cwValue > 0 ? piece.cwValue : 0), 0)
-    : Math.max(cargoGross, chargeableWeight)
-  const routeKey = `${origin}-${destination}`
+    : 0
   const routeIndex = master?.air.findIndex((a) => a.route === routeKey) ?? -1
   const routeRow = master && routeIndex >= 0 ? master.air[routeIndex] : null
 
@@ -1292,18 +1322,36 @@ export function OriginCostDeskSite() {
 
   return (
     <div className="desk-shell font-sans">
-      <header className="desk-topbar sticky top-0 z-40">
-        <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4 px-4 py-2 lg:px-6">
-          <div className="flex items-center gap-2.5">
-            <img src="/wac-mark-hero.png" alt="WAC" className="h-8 w-auto" />
-            <div>
-              <p className="text-[13px] font-bold text-wac-navy leading-tight">
-                Origin Cost Desk
-              </p>
-              <p className="text-[10px] text-slate-400">Air quotation desk</p>
+      <header className="desk-topbar">
+        <div className="desk-topbar-inner mx-auto max-w-[1600px] px-4 lg:px-6">
+          <div className="desk-brand">
+            <img src="/wac-mark-hero.png" alt="WAC" className="desk-brand-mark" />
+            <div className="desk-brand-text">
+              <span className="desk-brand-title">Origin Cost Desk</span>
+              <span className="desk-brand-sub">Air quotation desk</span>
             </div>
           </div>
-          <div className="hidden sm:flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px]">
+
+          <nav className="desk-nav" aria-label="Desk sections">
+            {(
+              [
+                ['master', 'Master_DB'],
+                ['input', 'Input'],
+                ['quote', 'Quotation'],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setTab(key)}
+                className={`desk-nav-tab ${tab === key ? 'is-active' : ''}`}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
+
+          <div className="desk-status">
             <span className="desk-status-item">
               <span className="desk-status-label">Route</span>
               <span className="desk-status-value">{origin}-{destination}</span>
@@ -1330,26 +1378,6 @@ export function OriginCostDeskSite() {
             </span>
           </div>
         </div>
-        <nav className="desk-nav">
-          <div className="mx-auto flex max-w-[1600px] px-2 lg:px-4">
-            {(
-              [
-                ['master', 'Master_DB'],
-                ['input', 'Input'],
-                ['quote', 'Quotation'],
-              ] as const
-            ).map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setTab(key)}
-                className={`desk-nav-tab ${tab === key ? 'is-active' : ''}`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </nav>
       </header>
 
       <main className="mx-auto max-w-[1600px] px-4 py-4 lg:px-6 lg:py-5">
@@ -1392,6 +1420,15 @@ export function OriginCostDeskSite() {
                   const file = e.target.files?.[0]
                   e.target.value = ''
                   if (!file) return
+                  const routeCount = master?.air.length ?? 0
+                  if (
+                    routeCount > 0 &&
+                    !window.confirm(
+                      `Replace saved Master (${routeCount} routes) with “${file.name}”?`,
+                    )
+                  ) {
+                    return
+                  }
                   void (async () => {
                     try {
                       const next = normalizeMaster(await parseCmMasterFile(file))
@@ -1532,6 +1569,17 @@ export function OriginCostDeskSite() {
                 </div>
               </div>
 
+              {!routeInMaster && origin && destination ? (
+                <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-[12px] font-semibold text-amber-900">
+                  Route {routeKey} is not in Master — pick a route or add it in Master_DB before saving.
+                </div>
+              ) : null}
+              {!usingDetailedCargo ? (
+                <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-[12px] font-semibold text-slate-600">
+                  Enter at least one complete cargo piece (L / W / H / Qty / Gross). Empty grid does not use sample defaults.
+                </div>
+              ) : null}
+
               <div>
                 <table className="w-full table-fixed border-collapse text-[12px] sm:text-[13px]">
                   <tbody>
@@ -1550,6 +1598,7 @@ export function OriginCostDeskSite() {
                           ref={(el) => {
                             cellRefs.current.consignee = el
                           }}
+                          {...selectAll}
                           className="desk-input font-bold"
                           value={consignee}
                           onChange={(e) => setConsignee(e.target.value)}
@@ -1577,6 +1626,7 @@ export function OriginCostDeskSite() {
                             })
                           }
                           type="text"
+                          {...selectAll}
                           className="desk-input"
                           value={blCountDraft}
                           onChange={(e) => setBlCountDraft(e.target.value)}
@@ -1709,12 +1759,16 @@ export function OriginCostDeskSite() {
                                             enter: `${piece.id}-w`,
                                             down: `${piece.id}-w`,
                                             up: pieceIndex === 0 ? 'route' : `${cargoPieces[pieceIndex - 1].id}-l`,
-                                            left: `${piece.id}-gross`,
+                                            left:
+                                              pieceIndex > 0
+                                                ? `${cargoPieces[pieceIndex - 1].id}-l`
+                                                : 'blCount',
                                             right: `${cargoPieces[pieceIndex + 1]?.id ?? piece.id}-l`,
                                           })
                                         }
                                         type="text"
                                         onPaste={handleCargoPaste(pieceIndex)}
+                                        {...selectAll}
                                         className="desk-input text-center"
                                         value={piece.length}
                                         onChange={(e) =>
@@ -1746,6 +1800,7 @@ export function OriginCostDeskSite() {
                                         }
                                         type="text"
                                         onPaste={handleCargoPaste(pieceIndex)}
+                                        {...selectAll}
                                         className="desk-input text-center"
                                         value={piece.width}
                                         onChange={(e) =>
@@ -1777,6 +1832,7 @@ export function OriginCostDeskSite() {
                                         }
                                         type="text"
                                         onPaste={handleCargoPaste(pieceIndex)}
+                                        {...selectAll}
                                         className="desk-input text-center"
                                         value={piece.height}
                                         onChange={(e) =>
@@ -1808,6 +1864,7 @@ export function OriginCostDeskSite() {
                                         }
                                         type="text"
                                         onPaste={handleCargoPaste(pieceIndex)}
+                                        {...selectAll}
                                         className="desk-input text-center"
                                         value={piece.qty}
                                         onChange={(e) =>
@@ -1839,6 +1896,7 @@ export function OriginCostDeskSite() {
                                         }
                                         type="text"
                                         onPaste={handleCargoPaste(index)}
+                                        {...selectAll}
                                         className="desk-input text-center"
                                         value={piece.gross}
                                         onChange={(e) =>
@@ -1973,9 +2031,11 @@ export function OriginCostDeskSite() {
                         <th className="px-3 py-2.5 text-left">Charge</th>
                         <th className="px-3 py-2.5 text-left">Unit</th>
                         <th className="px-3 py-2.5 text-right">참고</th>
-                        <th className="px-3 py-2.5 text-right">예외 (J)</th>
+                        <th className="px-3 py-2.5 text-right">예외</th>
                         <th className="px-3 py-2.5 text-right">Amount</th>
-                        <th className="w-10 px-2 py-2.5" />
+                        <th className="w-14 px-2 py-2.5 text-center" title="Include in TOTAL">
+                          Use
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2131,9 +2191,13 @@ export function OriginCostDeskSite() {
                               />
                             </td>
                             <td className="px-3 py-2.5 text-right font-bold text-slate-900">
-                              {l.amount.toFixed(2)}
+                              {l.excluded ? (
+                                <span className="text-slate-300">—</span>
+                              ) : (
+                                l.amount.toFixed(2)
+                              )}
                             </td>
-                            <td className="px-3 py-2.5 text-center">
+                            <td className="px-2 py-2.5 text-center">
                               {isDynamicOther ? (
                                 <button
                                   type="button"
@@ -2147,7 +2211,23 @@ export function OriginCostDeskSite() {
                                 >
                                   <Trash2 className="h-3.5 w-3.5" />
                                 </button>
-                              ) : null}
+                              ) : l.id === 'air' || l.id === 'fsc' || l.id === 'ssc' ? (
+                                <span className="text-[10px] text-slate-300">—</span>
+                              ) : (
+                                <input
+                                  type="checkbox"
+                                  className="h-4 w-4 accent-wac-orange"
+                                  title="Include in TOTAL"
+                                  checked={!l.excluded}
+                                  onChange={(e) => {
+                                    setDisabledFixedOtherIds((ids) =>
+                                      e.target.checked
+                                        ? ids.filter((id) => id !== l.id)
+                                        : [...ids, l.id],
+                                    )
+                                  }}
+                                />
+                              )}
                             </td>
                           </tr>
                         )
@@ -2183,6 +2263,7 @@ export function OriginCostDeskSite() {
                           })
                         }
                         type="text"
+                        {...selectAll}
                         className="desk-input text-sm font-bold"
                         value={fxDraft}
                         onChange={(e) => setFxDraft(e.target.value)}
@@ -2190,6 +2271,12 @@ export function OriginCostDeskSite() {
                       <p className="mt-1 text-[10px] text-slate-500">
                         HKD routes: TOTAL × Ex.Rate
                       </p>
+                      {deskQuote?.currency === 'HKD' &&
+                      Math.abs((Number(fxDraft) || 1) - 1) < 0.0001 ? (
+                        <p className="mt-1 text-[10px] font-semibold text-amber-700">
+                          Check Ex.Rate — still 1 for an HKD lane.
+                        </p>
+                      ) : null}
                     </div>
                     <div className="desk-label px-3 py-2 text-xs font-bold text-slate-600">Route</div>
                     <div className="px-3 py-2 text-sm font-bold text-slate-800">{deskQuote?.route}</div>
@@ -2210,6 +2297,7 @@ export function OriginCostDeskSite() {
                             up: 'fx',
                           })
                         }
+                        {...selectAll}
                         className="desk-input text-sm font-bold uppercase"
                         value={carrierCode}
                         onChange={(e) => setCarrierCode(e.target.value.toUpperCase())}

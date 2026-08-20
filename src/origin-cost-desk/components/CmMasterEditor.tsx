@@ -18,6 +18,7 @@ import {
   removeWeightBreak,
 } from '../cmMasterEdit'
 import { DraftTextInput } from './DraftTextInput'
+import { handleArrowNav } from '../deskInputUx'
 
 export function NumericCell({
   value,
@@ -35,6 +36,7 @@ export function NumericCell({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const draftRef = useRef('')
+  const selectAllOnMouseUp = useRef(false)
   const shown = editing
     ? draft
     : Number.isFinite(value)
@@ -47,15 +49,28 @@ export function NumericCell({
       type="text"
       inputMode="decimal"
       value={shown}
-      onFocus={() => {
+      onFocus={(event) => {
         const initial = Number.isFinite(value) ? String(value) : ''
         draftRef.current = initial
         setDraft(initial)
         setEditing(true)
+        selectAllOnMouseUp.current = true
+        event.currentTarget.select()
+      }}
+      onMouseUp={(event) => {
+        if (selectAllOnMouseUp.current) {
+          event.preventDefault()
+          event.currentTarget.select()
+          selectAllOnMouseUp.current = false
+        }
       }}
       onBlur={() => {
         setEditing(false)
-        const n = Number(draftRef.current.trim())
+        selectAllOnMouseUp.current = false
+        const raw = draftRef.current.trim()
+        // Empty / invalid → keep previous (do not commit Number('') === 0)
+        if (raw === '') return
+        const n = Number(raw)
         if (Number.isFinite(n)) onCommit(n)
       }}
       onChange={(e) => {
@@ -96,30 +111,7 @@ export function CmMasterEditor({ master, onChange }: Props) {
       right?: string
     },
   ) => {
-    if (event.key === 'Enter') {
-      event.preventDefault()
-      if (nav.enter) focusCell(nav.enter)
-      return
-    }
-    if (event.key === 'ArrowUp' && nav.up) {
-      event.preventDefault()
-      focusCell(nav.up)
-      return
-    }
-    if (event.key === 'ArrowDown' && nav.down) {
-      event.preventDefault()
-      focusCell(nav.down)
-      return
-    }
-    if (event.key === 'ArrowLeft' && nav.left) {
-      event.preventDefault()
-      focusCell(nav.left)
-      return
-    }
-    if (event.key === 'ArrowRight' && nav.right) {
-      event.preventDefault()
-      focusCell(nav.right)
-    }
+    handleArrowNav(event, nav, focusCell)
   }
 
   const patchAir = (i: number, patch: Partial<CmAirRate>) => {
@@ -424,15 +416,16 @@ export function CmMasterEditor({ master, onChange }: Props) {
             </thead>
             <tbody>
               {master.local.map((row, i) => (
-                <tr key={`${row.item}-${i}`}>
+                <tr key={`local-row-${i}`}>
                   <td>
-                    <input
-                      ref={(el) => {
+                    <DraftTextInput
+                      inputRef={(el) => {
                         cellRefs.current[`local-${i}-item`] = el
                       }}
-                      type="text"
                       value={row.item}
-                      onChange={(e) => patchLocal(i, { item: e.target.value })}
+                      onCommit={(next) =>
+                        patchLocal(i, { item: next.trim() || row.item })
+                      }
                       onKeyDown={(e) =>
                         handleNav(e, {
                           enter: `local-${i + 1 < master.local.length ? i + 1 : 0}-item`,
@@ -444,13 +437,12 @@ export function CmMasterEditor({ master, onChange }: Props) {
                     />
                   </td>
                   <td>
-                    <input
-                      ref={(el) => {
+                    <DraftTextInput
+                      inputRef={(el) => {
                         cellRefs.current[`local-${i}-unit`] = el
                       }}
-                      type="text"
                       value={row.unit}
-                      onChange={(e) => patchLocal(i, { unit: e.target.value })}
+                      onCommit={(next) => patchLocal(i, { unit: next })}
                       onKeyDown={(e) =>
                         handleNav(e, {
                           enter: `local-${i + 1 < master.local.length ? i + 1 : 0}-unit`,
@@ -501,17 +493,16 @@ export function CmMasterEditor({ master, onChange }: Props) {
                     />
                   </td>
                   <td>
-                    <input
-                      type="text"
+                    <DraftTextInput
                       value={row.note ?? ''}
-                      placeholder="C.W. kg"
-                      onChange={(e) =>
+                      placeholder="C.W. kg / G.W. kg"
+                      onCommit={(next) =>
                         patchLocal(i, {
-                          note: e.target.value.trim() || undefined,
+                          note: next.trim() || undefined,
                         })
                       }
                       className={`${plainInput} min-w-[88px] text-[11px] text-slate-500`}
-                      title="Per KG basis: C.W. kg (default) or G.W. kg"
+                      title="Per KG basis note (same as Master Note column)"
                     />
                   </td>
                   <td>

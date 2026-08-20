@@ -16,6 +16,7 @@ type Props = {
   onBlur?: (event: FocusEvent<HTMLInputElement>) => void
   onClick?: (event: React.MouseEvent<HTMLInputElement>) => void
   placeholder?: string
+  title?: string
 }
 
 /** Keeps local draft while focused so controlled parents do not reset cursor mid-typing. */
@@ -30,10 +31,12 @@ export function DraftTextInput({
   onBlur,
   onClick,
   placeholder,
+  title,
 }: Props) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const draftRef = useRef('')
+  const selectAllOnMouseUp = useRef(false)
 
   const shown = editing ? draft : value
 
@@ -43,16 +46,27 @@ export function DraftTextInput({
       type="text"
       value={shown}
       placeholder={placeholder}
+      title={title}
       className={className}
       onFocus={(event) => {
         const initial = value
         draftRef.current = initial
         setDraft(initial)
         setEditing(true)
+        selectAllOnMouseUp.current = true
+        event.currentTarget.select()
         onFocus?.(event)
+      }}
+      onMouseUp={(event) => {
+        if (selectAllOnMouseUp.current) {
+          event.preventDefault()
+          event.currentTarget.select()
+          selectAllOnMouseUp.current = false
+        }
       }}
       onBlur={(event) => {
         setEditing(false)
+        selectAllOnMouseUp.current = false
         const normalized = normalize ? normalize(draftRef.current) : draftRef.current
         if (normalized !== value) onCommit(normalized)
         onBlur?.(event)

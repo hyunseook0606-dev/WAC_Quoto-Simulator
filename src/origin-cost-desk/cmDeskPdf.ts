@@ -7,6 +7,8 @@ export function isLineVisibleOnPdf(
 ): boolean {
   const draft = exceptionDraft[line.id]?.trim() ?? ''
 
+  if (line.excluded) return false
+
   // Excel rule (as per user request):
   // - Other slots are hidden on PDF unless the user actually filled the 예외 (J column).
   //   (Even if Master reference exists and ref/amount are > 0, keep it hidden.)

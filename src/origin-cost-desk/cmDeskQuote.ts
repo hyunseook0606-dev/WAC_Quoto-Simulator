@@ -18,6 +18,8 @@ export type CmDeskLine = {
   editableRef?: boolean
   isOtherSlot?: boolean
   fromMasterLocal?: boolean
+  /** Unchecked “Use” on Input — kept in table but not in TOTAL/PDF */
+  excluded?: boolean
   note?: string
 }
 
@@ -225,35 +227,53 @@ export function calcCmDeskQuote(
 
   for (const local of master.local) {
     const id = localLineId(local.item)
-    if (disabled.includes(id)) continue
     const unit = units[id]?.trim() || local.unit
     const computed = localMasterRef({ ...local, unit }, ctx)
     const amt = resolveAmount(id, computed, exc, refOverrides)
+    const excluded = disabled.includes(id)
     lines.push(
-      line(id, local.item, unit, 'local', amt.ref, amt.override, amt.amount, {
-        // Master_DB 기반 자동 계산 항목은 Input에서 참고/단위 수정하지 않음.
-        // 예외(J)만 변경 가능하도록 editable flag을 제거한다.
-        fromMasterLocal: true,
-      }),
+      line(
+        id,
+        local.item,
+        unit,
+        'local',
+        amt.ref,
+        excluded ? null : amt.override,
+        excluded ? 0 : amt.amount,
+        {
+          fromMasterLocal: true,
+          excluded,
+        },
+      ),
     )
   }
 
   for (const extra of input.extraOthers ?? []) {
-    if (disabled.includes(extra.id)) continue
     const label = labels[extra.id]?.trim() || extra.label.trim() || 'Other'
     const unit = units[extra.id]?.trim() || extra.unit.trim() || 'Manual'
     const amt = resolveAmount(extra.id, 0, exc, refOverrides)
+    const excluded = disabled.includes(extra.id)
     lines.push(
-      line(extra.id, label, unit, 'variable', amt.ref, amt.override, amt.amount, {
-        editableLabel: true,
-        editableUnit: true,
-        editableRef: true,
-        isOtherSlot: true,
-      }),
+      line(
+        extra.id,
+        label,
+        unit,
+        'variable',
+        amt.ref,
+        excluded ? null : amt.override,
+        excluded ? 0 : amt.amount,
+        {
+          editableLabel: true,
+          editableUnit: true,
+          editableRef: true,
+          isOtherSlot: true,
+          excluded,
+        },
+      ),
     )
   }
 
-  const subtotal = lines.reduce((s, l) => s + l.amount, 0)
+  const subtotal = lines.reduce((s, l) => (l.excluded ? s : s + l.amount), 0)
   // Excel 입력 TOTAL: *IF(Currency="HKD", Ex.Rate, 1)
   const total = subtotal * (currency === 'HKD' ? fx : 1)
 
