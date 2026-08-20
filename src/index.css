@@ -5,8 +5,8 @@
   --color-wac-navy: #1A2A3A;
   --color-wac-orange: #F05023;
   --color-wac-slate: #F8FAFC;
-  --font-sans: "Noto Sans KR", ui-sans-serif, sans-serif;
-  --font-display: "Noto Sans KR", ui-sans-serif, sans-serif;
+  --font-sans: "Noto Sans KR", "Malgun Gothic", ui-sans-serif, sans-serif;
+  --font-display: "Noto Sans KR", "Malgun Gothic", ui-sans-serif, sans-serif;
 }
 
 * {

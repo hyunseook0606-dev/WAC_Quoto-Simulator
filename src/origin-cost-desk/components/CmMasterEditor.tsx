@@ -1,5 +1,5 @@
 import { Plus, Trash2 } from 'lucide-react'
-import { useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { CmAirRate, CmMaster } from '../cmExcelMaster'
 import {
   addAirRoute,
@@ -9,6 +9,44 @@ import {
   removeAirRoute,
   removeLocalCharge,
 } from '../cmMasterEdit'
+
+export function NumericCell({
+  value,
+  onCommit,
+  onKeyDown,
+  inputRef,
+  className,
+}: {
+  value: number
+  onCommit: (n: number) => void
+  onKeyDown?: (event: ReactKeyboardEvent<HTMLInputElement>) => void
+  inputRef?: (el: HTMLInputElement | null) => void
+  className?: string
+}) {
+  const [focused, setFocused] = useState(false)
+  const [draft, setDraft] = useState('')
+  const shown = focused ? draft : Number.isFinite(value) ? String(value) : ''
+  return (
+    <input
+      ref={inputRef}
+      type="text"
+      inputMode="decimal"
+      value={shown}
+      onFocus={() => {
+        setFocused(true)
+        setDraft(Number.isFinite(value) ? String(value) : '')
+      }}
+      onBlur={() => {
+        setFocused(false)
+        const n = Number(draft)
+        onCommit(Number.isFinite(n) ? n : 0)
+      }}
+      onChange={(e) => setDraft(e.target.value.replace(/[^\d.-]/g, ''))}
+      onKeyDown={onKeyDown}
+      className={className}
+    />
+  )
+}
 
 type Props = {
   master: CmMaster
@@ -142,18 +180,12 @@ export function CmMasterEditor({ master, onChange }: Props) {
                     ] as const
                   ).map((key, colIdx, keys) => (
                     <td key={key} className="px-2 py-1.5">
-                      <input
-                        ref={(el) => {
+                      <NumericCell
+                        inputRef={(el) => {
                           cellRefs.current[`air-${i}-${key}`] = el
                         }}
-                        type="text"
-                        inputMode="decimal"
-                        value={Number.isFinite(row[key]) ? String(row[key]) : ''}
-                        onChange={(e) =>
-                          patchAir(i, {
-                            [key]: Number(e.target.value) || 0,
-                          })
-                        }
+                        value={row[key]}
+                        onCommit={(n) => patchAir(i, { [key]: n })}
                         onKeyDown={(e) =>
                           handleNav(e, {
                             enter: `air-${i + 1 < master.air.length ? i + 1 : 0}-${key}`,
@@ -163,7 +195,7 @@ export function CmMasterEditor({ master, onChange }: Props) {
                             right: colIdx === keys.length - 1 ? `air-${i}-currency` : `air-${i}-${keys[colIdx + 1]}`,
                           })
                         }
-                        className="h-8 w-full min-w-[52px] rounded border border-slate-200 px-1.5 text-[11px] font-medium outline-none focus:border-wac-orange"
+                        className="h-8 w-full min-w-[52px] rounded border border-yellow-100 bg-yellow-50 px-1.5 text-[11px] font-medium outline-none focus:border-wac-orange"
                       />
                     </td>
                   ))}
@@ -276,14 +308,12 @@ export function CmMasterEditor({ master, onChange }: Props) {
                     />
                   </td>
                   <td className="px-2 py-1.5">
-                    <input
-                      ref={(el) => {
+                    <NumericCell
+                      inputRef={(el) => {
                         cellRefs.current[`local-${i}-rate`] = el
                       }}
-                      type="text"
-                      inputMode="decimal"
-                      value={Number.isFinite(row.rate) ? String(row.rate) : ''}
-                      onChange={(e) => patchLocal(i, { rate: Number(e.target.value) || 0 })}
+                      value={row.rate}
+                      onCommit={(n) => patchLocal(i, { rate: n })}
                       onKeyDown={(e) =>
                         handleNav(e, {
                           enter: `local-${i + 1 < master.local.length ? i + 1 : 0}-rate`,
@@ -293,18 +323,16 @@ export function CmMasterEditor({ master, onChange }: Props) {
                           right: `local-${i}-min`,
                         })
                       }
-                      className="h-8 w-full min-w-[52px] rounded border border-slate-200 px-1.5 text-[11px] font-medium outline-none focus:border-wac-orange"
+                      className="h-8 w-full min-w-[52px] rounded border border-yellow-100 bg-yellow-50 px-1.5 text-[11px] font-medium outline-none focus:border-wac-orange"
                     />
                   </td>
                   <td className="px-2 py-1.5">
-                    <input
-                      ref={(el) => {
+                    <NumericCell
+                      inputRef={(el) => {
                         cellRefs.current[`local-${i}-min`] = el
                       }}
-                      type="text"
-                      inputMode="decimal"
-                      value={Number.isFinite(row.min) ? String(row.min) : ''}
-                      onChange={(e) => patchLocal(i, { min: Number(e.target.value) || 0 })}
+                      value={row.min}
+                      onCommit={(n) => patchLocal(i, { min: n })}
                       onKeyDown={(e) =>
                         handleNav(e, {
                           enter: `local-${i + 1 < master.local.length ? i + 1 : 0}-min`,
@@ -313,7 +341,7 @@ export function CmMasterEditor({ master, onChange }: Props) {
                           left: `local-${i}-rate`,
                         })
                       }
-                      className="h-8 w-full min-w-[52px] rounded border border-slate-200 px-1.5 text-[11px] font-medium outline-none focus:border-wac-orange"
+                      className="h-8 w-full min-w-[52px] rounded border border-yellow-100 bg-yellow-50 px-1.5 text-[11px] font-medium outline-none focus:border-wac-orange"
                     />
                   </td>
                   <td className="px-1 py-1.5">

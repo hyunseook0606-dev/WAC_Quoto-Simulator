@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 48" fill="none">
-  <rect width="120" height="48" rx="4" fill="#FFFFFF"/>
-  <circle cx="22" cy="24" r="13" fill="#C8102E"/>
-  <path d="M16 28c4-8 10-12 16-14-3 5-6 10-7 16-3-1-6-1-9-2z" fill="#fff"/>
-  <text x="42" y="20" fill="#1A2A3A" font-family="Arial, Helvetica, sans-serif" font-size="8" font-weight="800" letter-spacing="0.4">HK AIR</text>
-  <text x="42" y="32" fill="#C8102E" font-family="Arial, Helvetica, sans-serif" font-size="8" font-weight="800" letter-spacing="0.4">CARGO</text>
-  <text x="96" y="40" fill="#94A3B8" font-family="Arial, Helvetica, sans-serif" font-size="7" font-weight="700">RH</text>
-</svg>

@@ -16,11 +16,6 @@ dist-ssr
 !.env.example
 .vercel
 
-# Local / scratch (not portfolio)
-submission_candidate_*/
-docs/보고서-캡처/*추출*
-docs/보고서-캡처/*pdf추출*
-
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -36,11 +31,9 @@ docs/보고서-캡처/*pdf추출*
 ~$*.xlsx
 excel-quote/~$*.xlsx
 
-# Presentation drafts (local only)
+# Presentation / report captures (not part of the desk app)
+docs/
 *.pptx
-docs/pitch-assets/
-docs/manus-ppt/images/
-docs/manus-ppt/*.html
 
 # Excel scratch copies / generated PDFs
 excel-quote/WAC_Air_Quotation_Simulator (2).xlsx

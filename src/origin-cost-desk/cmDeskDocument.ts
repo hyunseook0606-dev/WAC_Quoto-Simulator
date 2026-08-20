@@ -9,9 +9,9 @@ function esc(s: string) {
     .replace(/"/g, '&quot;')
 }
 
-function markSrc() {
-  if (typeof window === 'undefined') return '/wac-mark-hero.png'
-  return `${window.location.origin}/wac-mark-hero.png`
+/** Relative path only — print layer inlines this to a data URL so localhost never appears. */
+function logoSrc() {
+  return '/wac-logo.png'
 }
 
 const PRINT_FONT_FACE = `@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700;800;900&display=swap");
@@ -53,6 +53,14 @@ export function buildCmDeskQuotationHtml(opts: {
 
   const cur = quote.currency
   const pdfLines = filterLinesForPdf(quote.lines, exceptionDraft)
+  const filledCargo = (cargoSlots ?? []).filter((s) => s.dimensionsText)
+  const density =
+    pdfLines.length >= 18 || filledCargo.length >= 6
+      ? 'tight'
+      : pdfLines.length >= 12 || filledCargo.length >= 3
+        ? 'compact'
+        : 'normal'
+
   const rows = pdfLines
     .map(
       (l) => `<tr>
@@ -63,108 +71,10 @@ export function buildCmDeskQuotationHtml(opts: {
     )
     .join('')
 
-  const hasExcelCargo = Array.isArray(cargoSlots) && cargoSlots.length > 0
-  const logo = markSrc()
-
-  if (hasExcelCargo) {
-    const chargeRowsExcel = pdfLines
-      .map(
-        (l) => `<tr>
-          <td class="desc">${esc(l.label)}</td>
-          <td class="amt right">${l.amount.toFixed(2)}</td>
-        </tr>`,
-      )
-      .join('')
-
-    const cargoRows = cargoSlots!
-      .slice(0, 10)
-      .map((s) => {
-        const has = Boolean(s.dimensionsText)
-        return `<tr>
-          <td class="center">${s.index}</td>
-          <td>${has ? esc(s.dimensionsText) : ''}</td>
-          <td class="center">${has ? esc(s.qtyText) : ''}</td>
-          <td class="center">${has ? esc(s.grossText) : ''}</td>
-          <td class="green center">${has ? esc(s.cbmText) : ''}</td>
-          <td class="green center">${has ? esc(s.cwText) : ''}</td>
-        </tr>`
-      })
-      .join('')
-
-    return `<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="utf-8"/>
-<title>WAC Air Freight Quotation ${esc(origin)}-${esc(destination)}</title>
-<style>
-  ${PRINT_FONT_FACE}
-  @page { size: A4; margin: 10mm 12mm; }
-  * { box-sizing: border-box; }
-  body { margin: 0; color: #1A2A3A; font-size: 10.5pt; }
-
-  .bar { background: #1A2A3A; color: #fff; padding: 10px 16px; font-weight: 700; letter-spacing: .04em; display:flex; align-items:center; gap:10px; }
-  h1 { margin: 12px 0 2px; font-size: 18pt; }
-  .sub { color: #64748b; font-size: 9.5pt; margin: 0 0 10px; }
-
-  table { width: 100%; border-collapse: collapse; }
-  .ship th, .ship td { border: 1px solid #cbd5e1; padding: 7px 10px; font-size: 10.5pt; }
-  .ship .title { background:#1f2d3a; color:#fff; text-align:center; font-weight:700; }
-  .ship th { background:#1f2d3a; color:#fff; width: 14%; text-align:left; font-weight:700; }
-  .ship td { background:#fff; font-weight:600; }
-  .center { text-align:center; }
-
-  .cargo th, .cargo td { border: 1px solid #cbd5e1; padding: 7px 8px; font-size: 10.5pt; }
-  .cargo thead th { background:#243447; color:#fff; font-weight:700; }
-  .cargo .green { background:#E8F5E8; }
-  .cargoTotal td { background:#243447; color:#fff; font-weight:800; }
-  .cargoTotal .green { background:#E8F5E8; color:#1e293b; font-weight:800; }
-
-  .remarkTable { width: 100%; border: 1px solid #cbd5e1; border-collapse: collapse; margin-top: 8px; }
-  .remarkTable th { background:#243447; color:#fff; font-weight:700; padding: 7px 10px; width: 16%; text-align:left; }
-  .remarkTable td { padding: 10px 10px; background:#fff; font-weight:600; color:#1e293b; }
-
-  .charges th, .charges td { border: 1px solid #cbd5e1; padding: 7px 10px; font-size: 10.5pt; }
-  .charges thead th { background:#243447; color:#fff; font-weight:700; }
-  .charges .desc { width: 72%; }
-  .right { text-align:right; }
-
-  .charges .grandBar td { background:#F05023; color:#fff; font-weight:800; text-align:center; padding: 8px 10px; }
-  .charges .grandVal td { background:#fff7ed; font-weight:900; font-size: 18pt; padding: 10px 10px; text-align:right; }
-  .foot { margin-top: 12px; color: #64748b; font-size: 9pt; }
-</style>
-</head>
-<body>
-  <div class="bar"><img src="${logo}" alt="WAC" style="height:18px; width:auto;" />WAC LOGISTICS</div>
-  <h1>AIR FREIGHT QUOTATION</h1>
-  <div class="sub">Approximate quote · Not a final invoice</div>
-
-  <table class="ship">
-    <thead>
-      <tr><th class="title" colspan="6">Shipment</th></tr>
-    </thead>
-    <tbody>
-      ${consignee.trim() ? `<tr>
-        <th>Consignee</th><td colspan="5">${esc(consignee)}</td>
-      </tr>` : ''}
-      <tr>
-        <th>Route</th><td class="center">${esc(quote.route)}</td>
-        <th>B/L</th><td class="center">${Number.isFinite(blCount) && blCount > 0 ? blCount : 1}</td>
-        <th>Currency</th><td class="center">${esc(quote.currency)}</td>
-      </tr>
-      <tr>
-        <th>C.W.</th><td class="center">${quote.cw.toFixed(2)}</td>
-        <th>CBM</th><td class="center">${quote.cbm.toFixed(3)}</td>
-        <th>Break</th><td class="center">${esc(quote.breakLabel)}</td>
-      </tr>
-      <tr>
-        <th>Carrier</th><td colspan="5">${esc(carrierCode)}</td>
-      </tr>
-    </tbody>
-  </table>
-
-  <div style="height:10px"></div>
-
-  <table class="cargo">
+  const cargoTable =
+    filledCargo.length === 0
+      ? ''
+      : `<table class="cargo">
     <thead>
       <tr>
         <th style="width:7%">#</th>
@@ -176,82 +86,110 @@ export function buildCmDeskQuotationHtml(opts: {
       </tr>
     </thead>
     <tbody>
-      ${cargoRows}
+      ${filledCargo
+        .map(
+          (s) => `<tr>
+        <td class="center">${s.index}</td>
+        <td>${esc(s.dimensionsText)}</td>
+        <td class="center">${esc(s.qtyText)}</td>
+        <td class="center">${esc(s.grossText)}</td>
+        <td class="center green">${esc(s.cbmText)}</td>
+        <td class="center green">${esc(s.cwText)}</td>
+      </tr>`,
+        )
+        .join('')}
       <tr class="cargoTotal">
         <td colspan="4">TOTAL</td>
-        <td class="green center">${quote.cbm.toFixed(3)}</td>
-        <td class="green center">${quote.cw.toFixed(2)}</td>
+        <td class="center green">${quote.cbm.toFixed(3)}</td>
+        <td class="center green">${quote.cw.toFixed(2)}</td>
       </tr>
     </tbody>
-  </table>
+  </table>`
 
-  <table class="remarkTable">
-    <tr>
-      <th>Remark</th>
-      <td>${remark.trim() ? esc(remark) : ''}</td>
-    </tr>
-  </table>
-
-  <div style="height:10px"></div>
-
-  <table class="charges">
-    <thead>
-      <tr>
-        <th class="desc">Description</th>
-        <th style="text-align:right">Amount</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${chargeRowsExcel}
-      <tr class="grandBar"><td colspan="2">TOTAL APPX. AMOUNT</td></tr>
-      <tr class="grandVal"><td colspan="2">${cur} ${quote.total.toFixed(2)}</td></tr>
-    </tbody>
-  </table>
-  <div class="foot">This quotation is indicative and subject to confirmation.</div>
-</body>
-</html>`
-  }
+  const bl = Number.isFinite(blCount) && blCount > 0 ? blCount : 1
+  const logo = logoSrc()
 
   return `<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="utf-8"/>
-<title>WAC Air Freight Quotation ${esc(origin)}-${esc(destination)}</title>
+<title>AIR FREIGHT QUOTATION</title>
 <style>
   ${PRINT_FONT_FACE}
-  @page { size: A4; margin: 16mm 14mm; }
+  /* margin:0 hides Chrome/Edge print header/footer (localhost URL) */
+  @page { size: A4 portrait; margin: 0; }
   * { box-sizing: border-box; }
-  body { margin: 0; color: #1A2A3A; font-size: 11pt; background:#ffffff; }
-  .sheet { border: 1px solid #e2e8f0; border-radius: 14px; padding: 18px 18px 16px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06); }
-  .header { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom: 10px; }
-  .brand { display:flex; align-items:center; gap:12px; }
-  .brandMark { height: 34px; width: auto; display:block; }
-  .brandText { font-size: 14px; font-weight: 800; letter-spacing: .08em; color:#1A2A3A; text-transform: uppercase; }
-  .quoteBadge { padding: 6px 10px; border-radius: 999px; background:#fff7ed; color:#F05023; font-size: 9pt; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
-  .accent { height: 4px; border-radius: 999px; background: linear-gradient(90deg, #1A2A3A 0%, #243447 60%, #F05023 100%); margin-bottom: 14px; }
-  h1 { margin: 0 0 4px; font-size: 22pt; letter-spacing: .01em; }
-  .sub { color: #64748b; font-size: 10pt; margin-bottom: 18px; }
-  table.meta { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-  table.meta th, table.meta td { border: 1px solid #dbe4ee; padding: 8px 12px; text-align: left; font-size: 10pt; }
-  table.meta th { background: #243447; color: #fff; width: 28%; font-weight: 700; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 210mm;
+    color: #1A2A3A;
+    background: #ffffff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .sheet {
+    width: 210mm;
+    min-height: 297mm;
+    max-height: 297mm;
+    overflow: hidden;
+    padding: 8mm 10mm 7mm;
+    background: #ffffff;
+  }
+  .header { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom: 6px; }
+  .brandMarkWrap { background:#ffffff; border: 1px solid #e8eef4; border-radius: 8px; padding: 4px 8px; }
+  .brandMark { height: 26px; width: auto; display:block; }
+  .quoteBadge { padding: 4px 8px; border-radius: 999px; background:#fff7ed; color:#F05023; font-size: 8pt; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+  .accent { height: 3px; border-radius: 999px; background: linear-gradient(90deg, #1A2A3A 0%, #243447 60%, #F05023 100%); margin-bottom: 8px; }
+  h1 { margin: 0 0 2px; font-size: 16pt; letter-spacing: .01em; }
+  .sub { color: #64748b; font-size: 8pt; margin-bottom: 8px; }
+  table.meta { width: 100%; border-collapse: collapse; margin-bottom: 8px; table-layout: fixed; }
+  table.meta th, table.meta td { border: 1px solid #dbe4ee; padding: 4px 8px; text-align: left; font-size: 8.5pt; vertical-align: top; }
+  table.meta th { background: #243447; color: #fff; width: 14%; font-weight: 700; }
+  table.meta td { width: 36%; }
   table.chg { width: 100%; border-collapse: collapse; }
-  table.chg th { background: #243447; color: #fff; padding: 9px 12px; text-align: left; font-size: 13px; }
-  table.chg td { border: 1px solid #dbe4ee; padding: 9px 12px; }
+  table.chg th { background: #243447; color: #fff; padding: 5px 8px; text-align: left; font-size: 9pt; }
+  table.chg td { border: 1px solid #dbe4ee; padding: 4px 8px; font-size: 9pt; }
   .right { text-align: right; font-weight: 700; }
-  .muted { color: #64748b; font-size: 9pt; font-weight: 600; }
-  .note { color: #94a3b8; font-size: 8.5pt; font-weight: 400; margin-top: 2px; }
+  .muted { color: #64748b; font-size: 8pt; font-weight: 600; }
   .total-label { background: #F05023; color: #fff; font-weight: 800; letter-spacing:.04em; }
-  .total-amt { background: #fff7ed; color: #1e293b; font-weight: 900; font-size: 14pt; }
+  .total-amt { background: #fff7ed; color: #1e293b; font-weight: 900; font-size: 11pt; }
   .total td { border-color: #F05023; }
-  .foot { margin-top: 14px; color: #64748b; font-size: 9pt; }
+  table.cargo { width: 100%; border-collapse: collapse; margin: 0 0 8px; }
+  table.cargo th, table.cargo td { border: 1px solid #dbe4ee; padding: 3px 6px; font-size: 8pt; }
+  table.cargo thead th { background:#243447; color:#fff; font-weight:700; text-align:left; }
+  table.cargo .center { text-align:center; }
+  table.cargo .green { background:#E8F5E8; }
+  table.cargo .cargoTotal td { background:#243447; color:#fff; font-weight:800; }
+  table.cargo .cargoTotal .green { background:#E8F5E8; color:#1e293b; font-weight:800; }
+  .foot { margin-top: 6px; color: #64748b; font-size: 7.5pt; }
+
+  body.compact h1 { font-size: 14pt; }
+  body.compact .brandMark { height: 22px; }
+  body.compact table.meta th, body.compact table.meta td { padding: 3px 6px; font-size: 8pt; }
+  body.compact table.chg th { padding: 4px 6px; font-size: 8pt; }
+  body.compact table.chg td { padding: 3px 6px; font-size: 8pt; }
+  body.compact table.cargo th, body.compact table.cargo td { padding: 2px 5px; font-size: 7.5pt; }
+  body.compact .total-amt { font-size: 10pt; }
+
+  body.tight h1 { font-size: 13pt; }
+  body.tight .sub { margin-bottom: 5px; }
+  body.tight .brandMark { height: 20px; }
+  body.tight table.meta { margin-bottom: 5px; }
+  body.tight table.meta th, body.tight table.meta td { padding: 2px 5px; font-size: 7.5pt; }
+  body.tight table.chg th { padding: 3px 5px; font-size: 7.5pt; }
+  body.tight table.chg td { padding: 2px 5px; font-size: 7.5pt; }
+  body.tight table.cargo { margin-bottom: 5px; }
+  body.tight table.cargo th, body.tight table.cargo td { padding: 1px 4px; font-size: 7pt; }
+  body.tight .total-amt { font-size: 9.5pt; }
+  body.tight .foot { margin-top: 4px; font-size: 7pt; }
 </style>
 </head>
-<body>
+<body class="${density}">
   <div class="sheet">
   <div class="header">
-    <div class="brand">
-      <img class="brandMark" src="${logo}" alt="WAC" />
-      <div class="brandText">WAC LOGISTICS</div>
+    <div class="brandMarkWrap">
+      <img class="brandMark" src="${logo}" alt="WAC Logistics" />
     </div>
     <div class="quoteBadge">Air Freight Quote</div>
   </div>
@@ -259,14 +197,25 @@ export function buildCmDeskQuotationHtml(opts: {
   <h1>AIR FREIGHT QUOTATION</h1>
   <div class="sub">Approximate quote · Not a final invoice</div>
   <table class="meta">
-    ${consignee.trim() ? `<tr><th>Consignee</th><td>${esc(consignee)}</td></tr>` : ''}
-    <tr><th>Route</th><td>${esc(origin)} → ${esc(destination)} · ${esc(quote.route)}</td></tr>
-    <tr><th>Cargo</th><td>${esc(cargoSummary)}</td></tr>
-    <tr><th>C.W. / CBM</th><td><b>${quote.cw.toFixed(2)} kg</b> · ${quote.cbm.toFixed(3)} CBM · Break ${esc(quote.breakLabel)}</td></tr>
-    <tr><th>Carrier</th><td>${esc(carrierCode)}</td></tr>
-    <tr><th>Currency</th><td>${cur}</td></tr>
-    ${remark.trim() ? `<tr><th>Remark</th><td>${esc(remark)}</td></tr>` : ''}
+    <tr>
+      ${consignee.trim() ? `<th>Consignee</th><td>${esc(consignee)}</td>` : `<th>Route</th><td>${esc(origin)} → ${esc(destination)}</td>`}
+      <th>B/L</th><td>${bl}</td>
+    </tr>
+    <tr>
+      ${consignee.trim() ? `<th>Route</th><td>${esc(origin)} → ${esc(destination)}</td>` : `<th>Carrier</th><td>${esc(carrierCode)}</td>`}
+      <th>Currency</th><td>${cur}</td>
+    </tr>
+    <tr>
+      <th>Cargo</th><td colspan="3">${esc(cargoSummary)}</td>
+    </tr>
+    <tr>
+      <th>C.W. / CBM</th>
+      <td><b>${quote.cw.toFixed(2)} kg</b> · ${quote.cbm.toFixed(3)} CBM · ${esc(quote.breakLabel)}</td>
+      ${consignee.trim() ? `<th>Carrier</th><td>${esc(carrierCode)}</td>` : `<th>Lane</th><td>${esc(quote.route)}</td>`}
+    </tr>
+    ${remark.trim() ? `<tr><th>Remark</th><td colspan="3">${esc(remark)}</td></tr>` : ''}
   </table>
+  ${cargoTable}
   <table class="chg">
     <thead><tr><th>Charge</th><th>Unit</th><th style="text-align:right">Amount</th></tr></thead>
     <tbody>
@@ -277,6 +226,7 @@ export function buildCmDeskQuotationHtml(opts: {
       </tr>
     </tbody>
   </table>
+  <div class="foot">This quotation is indicative and subject to confirmation.</div>
   </div>
 </body>
 </html>`

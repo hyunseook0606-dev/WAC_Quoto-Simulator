@@ -2,12 +2,7 @@
  * Excel 입력 시트: Master 참고(I) + 예외(J) → TOTAL
  */
 import type { CmLocalRate, CmMaster } from './cmExcelMaster'
-import {
-  DEFAULT_OTHER_LABELS,
-  MASTER_OTHER_COUNT,
-  TOTAL_OTHER_SLOTS,
-  type CmExtraOther,
-} from './cmDeskConfig'
+import { type CmExtraOther } from './cmDeskConfig'
 
 export type CmDeskLine = {
   id: string
@@ -19,7 +14,9 @@ export type CmDeskLine = {
   group: 'air' | 'local' | 'variable'
   editableLabel?: boolean
   editableUnit?: boolean
+  editableRef?: boolean
   isOtherSlot?: boolean
+  fromMasterLocal?: boolean
   note?: string
 }
 
@@ -61,14 +58,31 @@ export type CmDeskQuoteInput = {
   blCount?: number
   fx?: number
   exceptions?: Record<string, number | null | undefined>
+  refOverrides?: Record<string, number | null | undefined>
   otherLabels?: Record<string, string>
   otherUnits?: Record<string, string>
   extraOthers?: CmExtraOther[]
   disabledLineIds?: string[]
 }
 
-function pickLocal(master: CmMaster, name: string): CmLocalRate | undefined {
-  return master.local.find((l) => l.item === name)
+export function localLineId(item: string): string {
+  const known: Record<string, string> = {
+    'Handling Fee': 'handling',
+    'Doc Fee': 'doc',
+    Trucking: 'trucking',
+    'Terminal Charge': 'terminal',
+    XRAY: 'xray',
+    CFS: 'cfs',
+    'Pickup (temp)': 'pickup',
+    'Export declaration': 'export',
+    'RE-PACKING': 'repack',
+    'Gate / parking / toll': 'gate',
+  }
+  if (known[item]) return known[item]
+  return `local-${item
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')}`
 }
 
 function pickAirRate(
@@ -97,13 +111,17 @@ function useAmount(
   key: string,
   computed: number,
   exceptions: Record<string, number | null | undefined>,
+  refOverrides: Record<string, number | null | undefined>,
 ): { ref: number; override: number | null; amount: number } {
-  const ref = computed
+  const ref =
+    key in refOverrides && refOverrides[key] != null
+      ? Number(refOverrides[key])
+      : computed
   if (key in exceptions && exceptions[key] != null) {
     const override = Number(exceptions[key])
     return { ref, override, amount: override }
   }
-  return { ref, override: null, amount: computed }
+  return { ref, override: null, amount: ref }
 }
 
 function line(
@@ -128,59 +146,21 @@ function line(
   }
 }
 
-function otherLabel(labels: Record<string, string>, id: string): string {
-  return labels[id]?.trim() || DEFAULT_OTHER_LABELS[id] || id
-}
-
-function otherUnit(units: Record<string, string>, id: string, fallback: string): string {
-  return units[id]?.trim() || fallback
-}
-
-/** Master-linked Other 1?? auto refs (Excel ?낅젰 rows 25??0) */
-function masterOtherRef(
-  id: string,
-  master: CmMaster,
-  cw: number,
-  bl: number,
-  qty: number,
+/** Master local 참고(I): unit 기준으로 Excel 입력 시트와 같은 과금 */
+export function localMasterRef(
+  item: CmLocalRate,
+  ctx: { cw: number; cbm: number; bl: number; qty: number },
 ): number {
-  switch (id) {
-    case 'other1': {
-      const m = pickLocal(master, 'XRAY')
-      return m ? m.rate * cw : 0
-    }
-    case 'other2': {
-      const m = pickLocal(master, 'CFS')
-      return m ? Math.max(m.rate * cw, m.min) : 0
-    }
-    case 'other3': {
-      const m = pickLocal(master, 'Pickup (temp)')
-      return m ? m.min : 0
-    }
-    case 'other4': {
-      const m = pickLocal(master, 'Export declaration')
-      return m ? Math.max(m.rate * bl, m.min) * bl : 0
-    }
-    case 'other5': {
-      const m = pickLocal(master, 'RE-PACKING')
-      return m ? m.rate * qty : 0
-    }
-    case 'other6': {
-      const m = pickLocal(master, 'Gate / parking / toll')
-      return m ? m.min : 0
-    }
-    default:
-      return 0
+  const unit = item.unit.toUpperCase()
+  if (unit.includes('CBM')) return Math.max(item.rate * ctx.cbm, item.min)
+  if (unit.includes('KG') || unit.includes('C.W')) {
+    return Math.max(item.rate * ctx.cw, item.min)
   }
-}
-
-const MASTER_OTHER_UNITS: Record<string, string> = {
-  other1: 'Per KG',
-  other2: 'Per KG',
-  other3: 'Per Shipment',
-  other4: 'Per Entry',
-  other5: 'Per PLT',
-  other6: 'Manual',
+  if (unit.includes('BL') || unit.includes('ENTRY')) {
+    return Math.max(item.rate, item.min) * ctx.bl
+  }
+  if (unit.includes('PLT')) return item.rate * ctx.qty
+  return Math.max(item.rate, item.min)
 }
 
 export function calcCmDeskQuote(
@@ -192,6 +172,7 @@ export function calcCmDeskQuote(
   if (!air) return null
 
   const exc = input.exceptions ?? {}
+  const refOverrides = input.refOverrides ?? {}
   const labels = input.otherLabels ?? {}
   const units = input.otherUnits ?? {}
   const bl = input.blCount ?? 1
@@ -224,35 +205,11 @@ export function calcCmDeskQuote(
   const breakLabel = breakForCw(cw, master)
   const airRate = pickAirRate(air, breakLabel)
   const currency = air.currency ?? 'USD'
+  const ctx = { cw, cbm, bl, qty: totalQty }
 
-  const handlingM = pickLocal(master, 'Handling Fee')
-  const docM = pickLocal(master, 'Doc Fee')
-  const truckM = pickLocal(master, 'Trucking')
-  const termM = pickLocal(master, 'Terminal Charge')
-
-  const airAmt = useAmount('air', Math.max(airRate * cw, air.min), exc)
-  const fscAmt = useAmount('fsc', air.fsc * cw, exc)
-  const sscAmt = useAmount('ssc', air.ssc * cw, exc)
-  const handlingAmt = useAmount(
-    'handling',
-    handlingM ? Math.max(handlingM.rate, handlingM.min) : 0,
-    exc,
-  )
-  const docAmt = useAmount(
-    'doc',
-    docM ? Math.max(docM.rate, docM.min) * bl : 0,
-    exc,
-  )
-  const truckingAmt = useAmount(
-    'trucking',
-    truckM ? Math.max(truckM.rate * cbm, truckM.min) : 0,
-    exc,
-  )
-  const terminalAmt = useAmount(
-    'terminal',
-    termM ? Math.max(termM.rate * cw, termM.min) : 0,
-    exc,
-  )
+  const airAmt = useAmount('air', Math.max(airRate * cw, air.min), exc, refOverrides)
+  const fscAmt = useAmount('fsc', air.fsc * cw, exc, refOverrides)
+  const sscAmt = useAmount('ssc', air.ssc * cw, exc, refOverrides)
 
   const lines: CmDeskLine[] = [
     line('air', 'Air Freight', 'Per KG', 'air', airAmt.ref, airAmt.override, airAmt.amount, {
@@ -260,95 +217,41 @@ export function calcCmDeskQuote(
     }),
     line('fsc', 'FSC', 'Per KG', 'air', fscAmt.ref, fscAmt.override, fscAmt.amount),
     line('ssc', 'SSC', 'Per KG', 'air', sscAmt.ref, sscAmt.override, sscAmt.amount),
-    line(
-      'handling',
-      'Handling Fee',
-      handlingM?.unit ?? 'Per Shipment',
-      'local',
-      handlingAmt.ref,
-      handlingAmt.override,
-      handlingAmt.amount,
-    ),
-    line(
-      'doc',
-      'Doc Fee',
-      docM?.unit ?? 'Per BL',
-      'local',
-      docAmt.ref,
-      docAmt.override,
-      docAmt.amount,
-    ),
-    line(
-      'trucking',
-      'Trucking',
-      truckM?.unit ?? 'Per CBM',
-      'local',
-      truckingAmt.ref,
-      truckingAmt.override,
-      truckingAmt.amount,
-    ),
-    line(
-      'terminal',
-      'Terminal Charge',
-      termM?.unit ?? 'Per KG',
-      'local',
-      terminalAmt.ref,
-      terminalAmt.override,
-      terminalAmt.amount,
-    ),
   ]
 
-  for (let i = 1; i <= TOTAL_OTHER_SLOTS; i++) {
-    const id = `other${i}`
+  for (const local of master.local) {
+    const id = localLineId(local.item)
     if (disabled.includes(id)) continue
-    const isMasterLinked = i <= MASTER_OTHER_COUNT
-    const ref = isMasterLinked
-      ? masterOtherRef(id, master, cw, bl, totalQty)
-      : 0
-    const amt = useAmount(id, ref, exc)
+    const unit = units[id]?.trim() || local.unit
+    const computed = localMasterRef({ ...local, unit }, ctx)
+    const amt = useAmount(id, computed, exc, refOverrides)
     lines.push(
-      line(
-        id,
-        otherLabel(labels, id),
-        otherUnit(units, id, MASTER_OTHER_UNITS[id] ?? 'Manual'),
-        'variable',
-        amt.ref,
-        amt.override,
-        amt.amount,
-        {
-          editableLabel: true,
-          editableUnit: true,
-          isOtherSlot: true,
-        },
-      ),
+      line(id, local.item, unit, 'local', amt.ref, amt.override, amt.amount, {
+        editableUnit: true,
+        editableRef: true,
+        fromMasterLocal: true,
+      }),
     )
   }
 
   for (const extra of input.extraOthers ?? []) {
     if (disabled.includes(extra.id)) continue
-    const amt = useAmount(extra.id, 0, exc)
+    const label = labels[extra.id]?.trim() || extra.label.trim() || 'Other'
+    const unit = units[extra.id]?.trim() || extra.unit.trim() || 'Manual'
+    const amt = useAmount(extra.id, 0, exc, refOverrides)
     lines.push(
-      line(
-        extra.id,
-        extra.label.trim() || 'Other',
-        extra.unit.trim() || 'Manual',
-        'variable',
-        amt.ref,
-        amt.override,
-        amt.amount,
-        {
-          editableLabel: true,
-          editableUnit: true,
-          isOtherSlot: true,
-        },
-      ),
+      line(extra.id, label, unit, 'variable', amt.ref, amt.override, amt.amount, {
+        editableLabel: true,
+        editableUnit: true,
+        editableRef: true,
+        isOtherSlot: true,
+      }),
     )
   }
 
   const subtotal = lines.reduce((s, l) => s + l.amount, 0)
-  // fx is defined as USD?묱KD rate in the Excel sheet.
-  // So only apply when the lane currency is USD.
-  const total = subtotal * (currency === 'USD' ? fx : 1)
+  // Excel 입력 TOTAL: *IF(Currency="HKD", Ex.Rate, 1)
+  const total = subtotal * (currency === 'HKD' ? fx : 1)
 
   return {
     route,

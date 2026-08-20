@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 48" fill="none">
-  <!-- Singapore Airlines stylized bird mark + wordmark -->
-  <path d="M18 34c8-2 16-10 20-22-6 8-14 12-22 14 4-6 10-12 18-16-12 4-22 12-26 24 6-2 8-2 10 0z" fill="#1A2A3A"/>
-  <path d="M28 12c4 2 8 6 10 12-4-2-8-4-12-4 2-3 2-6 2-8z" fill="#F05023"/>
-  <text x="48" y="22" fill="#1A2A3A" font-family="Arial, Helvetica, sans-serif" font-size="9" font-weight="700" letter-spacing="0.5">SINGAPORE</text>
-  <text x="48" y="34" fill="#1A2A3A" font-family="Arial, Helvetica, sans-serif" font-size="9" font-weight="700" letter-spacing="0.5">AIRLINES</text>
-</svg>

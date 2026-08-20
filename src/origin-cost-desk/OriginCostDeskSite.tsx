@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import * as XLSX from 'xlsx'
-import { FileSpreadsheet, Loader2, Plus, Trash2 } from 'lucide-react'
-import { CmMasterEditor } from './components/CmMasterEditor'
+import { FileSpreadsheet, Loader2, Pin, Plus, Search, Trash2 } from 'lucide-react'
+import { CmMasterEditor, NumericCell } from './components/CmMasterEditor'
 import {
   calcCmDeskQuote,
   parseCmExceptions,
@@ -15,7 +15,8 @@ import {
 import { filterLinesForPdf } from './cmDeskPdf'
 import { buildCmDeskPlainTable, buildCmDeskQuotationHtml } from './cmDeskDocument'
 import { printQuotation } from '../quoteDocument'
-import { TOTAL_OTHER_SLOTS, type CmExtraOther } from './cmDeskConfig'
+import { type CmExtraOther } from './cmDeskConfig'
+import { patchAirRoute } from './cmMasterEdit'
 
 type TabKey = 'master' | 'input' | 'quote'
 type CargoPieceDraft = {
@@ -43,6 +44,7 @@ type QuoteHistoryItem = {
   otherUnits: Record<string, string>
   extraOthers: CmExtraOther[]
   disabledFixedOtherIds: string[]
+  refDraft?: Record<string, string>
   // Snapshot of computed values (for list display + quick filters)
   currency: 'USD' | 'HKD'
   total: number
@@ -50,6 +52,8 @@ type QuoteHistoryItem = {
   cbm: number
   breakLabel: string
   savedPdfHtml?: string
+  pinned?: boolean
+  caseName?: string
 }
 
 type QuoteDraft = {
@@ -67,6 +71,7 @@ type QuoteDraft = {
   otherUnits: Record<string, string>
   extraOthers: CmExtraOther[]
   disabledFixedOtherIds: string[]
+  refDraft: Record<string, string>
 }
 
 function esc(s: string) {
@@ -82,6 +87,71 @@ function normalizeIntDraft(raw: string): string {
   if (cleaned === '') return ''
   // 030 -> 30, 000 -> 0
   return cleaned.replace(/^0+(?=\d)/, '')
+}
+
+function cargoDimsText(pieces: CargoPieceDraft[]): string {
+  return pieces
+    .filter((p) => p.length && p.width && p.height)
+    .map(
+      (p) =>
+        `${p.length}×${p.width}×${p.height}${p.qty ? `/${p.qty}pcs` : ''}${
+          p.gross ? ` ${p.gross}kg` : ''
+        }`,
+    )
+    .join(' · ')
+}
+
+function historySearchBlob(item: QuoteHistoryItem): string {
+  return [
+    item.consignee,
+    item.origin,
+    item.destination,
+    `${item.origin}-${item.destination}`,
+    item.carrierCode,
+    item.deskRemark,
+    item.caseName,
+    item.breakLabel,
+    item.currency,
+    String(item.total),
+    cargoDimsText(item.cargoPieces),
+  ]
+    .join(' ')
+    .toUpperCase()
+}
+
+function caseFingerprint(item: {
+  consignee: string
+  origin: string
+  destination: string
+  cargoPieces: CargoPieceDraft[]
+  exceptionDraft: Record<string, string>
+  deskRemark: string
+  extraOthers: CmExtraOther[]
+}): string {
+  return [
+    item.consignee.trim().toUpperCase(),
+    item.origin,
+    item.destination,
+    cargoDimsText(item.cargoPieces),
+    JSON.stringify(item.exceptionDraft),
+    item.deskRemark.trim().toUpperCase(),
+    item.extraOthers.map((row) => row.label).join(','),
+  ].join('|')
+}
+
+function defaultCaseName(item: {
+  consignee: string
+  origin: string
+  destination: string
+  deskRemark: string
+}): string {
+  const remark = item.deskRemark.trim()
+  const bits = [
+    item.consignee.trim(),
+    remark ? remark.slice(0, 28) : '',
+    `${item.origin}-${item.destination}`,
+  ].filter(Boolean)
+  return bits.join(' · ')
 }
 
 function normalizeNumberDraft(raw: string): string {
@@ -127,7 +197,7 @@ export function OriginCostDeskSite() {
       })),
   )
 
-  // Excel C34 (fx): for HKD-native lanes use 1.0, for USD→HKD set value.
+  // Excel: TOTAL × Ex.Rate when Currency is HKD; USD TOTAL is unchanged.
   const [fxDraft, setFxDraft] = useState('1')
 
   const [carrierCode, setCarrierCode] = useState('KE')
@@ -138,18 +208,19 @@ export function OriginCostDeskSite() {
   const [otherLabels, setOtherLabels] = useState<Record<string, string>>({})
   const [otherUnits, setOtherUnits] = useState<Record<string, string>>({})
 
-  // Optional: allow adding dynamic extra Other rows beyond other1–other12.
+  // Optional extra Other rows (Master 로컬 항목 외 수기 추가)
   const [extraOthers, setExtraOthers] = useState<CmExtraOther[]>([])
-  // Excel-like: users can delete/re-add fixed Other slots (other1–other12).
   const [disabledFixedOtherIds, setDisabledFixedOtherIds] = useState<string[]>(
     [],
   )
+  const [refDraft, setRefDraft] = useState<Record<string, string>>({})
 
   const HISTORY_KEY = 'origin-cost-desk.quote-history.v1'
   const DRAFT_KEY = 'origin-cost-desk.draft.v1'
   const [quoteHistory, setQuoteHistory] = useState<QuoteHistoryItem[]>([])
-  const [historyConsigneeQuery, setHistoryConsigneeQuery] = useState('')
-  const [historyRouteQuery, setHistoryRouteQuery] = useState('')
+  const [historyQuery, setHistoryQuery] = useState('')
+  const [historyShowAdvanced, setHistoryShowAdvanced] = useState(false)
+  const [historySameRoute, setHistorySameRoute] = useState(false)
   const [historyDateFrom, setHistoryDateFrom] = useState('')
   const [historyDateTo, setHistoryDateTo] = useState('')
   const [historyMinTotal, setHistoryMinTotal] = useState('')
@@ -159,6 +230,11 @@ export function OriginCostDeskSite() {
   const [historyUseCurrentSize, setHistoryUseCurrentSize] = useState(false)
   const [historySizeTolerance, setHistorySizeTolerance] = useState('20')
   const [loadedHistoryPdfHtml, setLoadedHistoryPdfHtml] = useState('')
+  const [historyNotice, setHistoryNotice] = useState<{
+    kind: 'reuse' | 'open'
+    text: string
+  } | null>(null)
+  const [caseNameDraft, setCaseNameDraft] = useState('')
 
   const [isLoading, setIsLoading] = useState(false)
   const cellRefs = useRef<Record<string, HTMLInputElement | null>>({})
@@ -228,6 +304,7 @@ export function OriginCostDeskSite() {
       setOtherUnits({ ...(d.otherUnits ?? {}) })
       setExtraOthers(d.extraOthers ?? [])
       setDisabledFixedOtherIds(d.disabledFixedOtherIds ?? [])
+      setRefDraft({ ...(d.refDraft ?? {}) })
       setTab('input')
     } catch {
       // ignore
@@ -265,6 +342,7 @@ export function OriginCostDeskSite() {
           otherUnits,
           extraOthers,
           disabledFixedOtherIds,
+          refDraft,
         }
         localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
       } catch {
@@ -287,6 +365,7 @@ export function OriginCostDeskSite() {
     otherUnits,
     extraOthers,
     disabledFixedOtherIds,
+    refDraft,
   ])
 
   useEffect(() => {
@@ -381,6 +460,7 @@ export function OriginCostDeskSite() {
       blCount,
       fx,
       exceptions: parseCmExceptions(exceptionDraft),
+      refOverrides: parseCmExceptions(refDraft),
       otherLabels,
       otherUnits,
       extraOthers,
@@ -399,6 +479,7 @@ export function OriginCostDeskSite() {
     fx,
     normalizedCargoPieces,
     exceptionDraft,
+    refDraft,
     otherLabels,
     otherUnits,
     extraOthers,
@@ -421,19 +502,6 @@ export function OriginCostDeskSite() {
   }
 
   const addOtherRow = () => {
-    // 1) Re-enable a previously deleted fixed slot (other1–other12)
-    const firstDisabled = Array.from(
-      { length: TOTAL_OTHER_SLOTS },
-      (_, i) => `other${i + 1}`,
-    ).find((id) => disabledFixedOtherIds.includes(id))
-    if (firstDisabled) {
-      setDisabledFixedOtherIds((ids) =>
-        ids.filter((id) => id !== firstDisabled),
-      )
-      return
-    }
-
-    // 2) Otherwise add a dynamic extra row (beyond other1–other12)
     setExtraOthers((rows) => [
       ...rows,
       {
@@ -657,9 +725,10 @@ export function OriginCostDeskSite() {
       cargoSlots: cargoSlotsForPdf,
     })
     printQuotation(html)
+    saveQuoteToHistory({ auto: true })
   }
 
-  const saveQuoteToHistory = () => {
+  const saveQuoteToHistory = (opts?: { auto?: boolean; pin?: boolean }) => {
     if (!deskQuote) return
 
     const cargoSlotsForPdf = cargoPieces.map((p, i) => {
@@ -709,6 +778,15 @@ export function OriginCostDeskSite() {
       cargoSlots: cargoSlotsForPdf,
     })
 
+    const name =
+      caseNameDraft.trim() ||
+      defaultCaseName({
+        consignee,
+        origin,
+        destination,
+        deskRemark,
+      })
+
     const item: QuoteHistoryItem = {
       id: `qh-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       createdAt: new Date().toISOString(),
@@ -725,20 +803,94 @@ export function OriginCostDeskSite() {
       otherUnits: { ...otherUnits },
       extraOthers: extraOthers.map((o) => ({ ...o })),
       disabledFixedOtherIds: [...disabledFixedOtherIds],
+      refDraft: { ...refDraft },
       currency: deskQuote.currency,
       total: deskQuote.total,
       cw: deskQuote.cw,
       cbm: deskQuote.cbm,
       breakLabel: deskQuote.breakLabel,
       savedPdfHtml,
+      pinned: Boolean(opts?.pin),
+      caseName: opts?.pin ? name : undefined,
     }
 
-    setQuoteHistory((prev) => [item, ...prev].slice(0, 200))
+    const fp = caseFingerprint(item)
+
+    setQuoteHistory((prev) => {
+      if (opts?.pin) {
+        const existing = prev.findIndex(
+          (row) => row.pinned && caseFingerprint(row) === fp,
+        )
+        if (existing >= 0) {
+          const next = [...prev]
+          const keepId = next[existing].id
+          next.splice(existing, 1)
+          return [{ ...item, id: keepId, pinned: true, caseName: name }, ...next].slice(
+            0,
+            200,
+          )
+        }
+        return [item, ...prev].slice(0, 200)
+      }
+
+      if (opts?.auto) {
+        const existing = prev.findIndex(
+          (row) => !row.pinned && caseFingerprint(row) === fp,
+        )
+        if (existing >= 0) {
+          const next = [...prev]
+          const keep = next[existing]
+          next.splice(existing, 1)
+          return [
+            {
+              ...item,
+              id: keep.id,
+              pinned: false,
+              caseName: keep.caseName,
+            },
+            ...next,
+          ].slice(0, 200)
+        }
+      }
+
+      return [item, ...prev].slice(0, 200)
+    })
+
+    if (opts?.pin) {
+      setCaseNameDraft('')
+      setHistoryNotice({
+        kind: 'reuse',
+        text: `Pinned “${name}”. Next time click it at the top of Input — only change cargo or 예외 if this job is different.`,
+      })
+      return
+    }
+
+    if (!opts?.auto) {
+      setHistoryNotice({
+        kind: 'open',
+        text: 'Saved to history. Pin it if this is a repeat case.',
+      })
+    }
+  }
+
+  const togglePinHistory = (id: string) => {
+    setQuoteHistory((prev) =>
+      prev.map((row) => {
+        if (row.id !== id) return row
+        const pinned = !row.pinned
+        return {
+          ...row,
+          pinned,
+          caseName: pinned
+            ? row.caseName?.trim() || defaultCaseName(row)
+            : row.caseName,
+        }
+      }),
+    )
   }
 
   const filteredQuoteHistory = useMemo(() => {
-    const consigneeQ = historyConsigneeQuery.trim().toUpperCase()
-    const routeQ = historyRouteQuery.trim().toUpperCase()
+    const q = historyQuery.trim().toUpperCase()
     const dateFrom = historyDateFrom.trim()
     const dateTo = historyDateTo.trim()
     const minTotal = historyMinTotal.trim() ? Number(historyMinTotal) : null
@@ -750,16 +902,15 @@ export function OriginCostDeskSite() {
       : 20
 
     const isFiniteNum = (n: number | null) => n != null && Number.isFinite(n)
+    const currentRoute = `${origin}-${destination}`.toUpperCase()
 
     return quoteHistory.filter((item) => {
-      if (
-        consigneeQ &&
-        !item.consignee.toUpperCase().includes(consigneeQ)
-      ) {
-        return false
+      if (q && !historySearchBlob(item).includes(q)) return false
+
+      if (historySameRoute) {
+        const route = `${item.origin}-${item.destination}`.toUpperCase()
+        if (route !== currentRoute) return false
       }
-      const route = `${item.origin}-${item.destination}`.toUpperCase()
-      if (routeQ && !route.includes(routeQ)) return false
 
       if (dateFrom) {
         const itemDate = item.createdAt.slice(0, 10)
@@ -780,28 +931,26 @@ export function OriginCostDeskSite() {
       if (isFiniteNum(minGross) && grossSum < minGross!) return false
       if (isFiniteNum(maxGross) && grossSum > maxGross!) return false
 
-      if (
-        historyUseCurrentSize &&
-        deskQuote &&
-        Number.isFinite(tolerancePct) &&
-        tolerancePct >= 0
-      ) {
+      if (historyUseCurrentSize && Number.isFinite(tolerancePct) && tolerancePct >= 0) {
+        const cbm = deskQuote?.cbm ?? cargoCbm
+        const cw = deskQuote?.cw ?? Math.max(cargoGross, cargoCbm * 167)
         const ratio = tolerancePct / 100
-        const cbmMin = deskQuote.cbm * (1 - ratio)
-        const cbmMax = deskQuote.cbm * (1 + ratio)
-        const cwMin = deskQuote.cw * (1 - ratio)
-        const cwMax = deskQuote.cw * (1 + ratio)
-
-        if (item.cbm < cbmMin || item.cbm > cbmMax) return false
-        if (item.cw < cwMin || item.cw > cwMax) return false
+        if (item.cbm < cbm * (1 - ratio) || item.cbm > cbm * (1 + ratio)) {
+          return false
+        }
+        if (item.cw < cw * (1 - ratio) || item.cw > cw * (1 + ratio)) {
+          return false
+        }
       }
 
       return true
     })
   }, [
     quoteHistory,
-    historyConsigneeQuery,
-    historyRouteQuery,
+    historyQuery,
+    historySameRoute,
+    origin,
+    destination,
     historyDateFrom,
     historyDateTo,
     historyMinTotal,
@@ -811,13 +960,28 @@ export function OriginCostDeskSite() {
     historyUseCurrentSize,
     historySizeTolerance,
     deskQuote,
+    cargoCbm,
+    cargoGross,
   ])
 
-  const loadQuoteFromHistory = (item: QuoteHistoryItem) => {
+  const applyHistoryItem = (item: QuoteHistoryItem) => {
+    const loaded = (item.cargoPieces ?? []).slice(0, CARGO_DETAIL_SLOTS)
+    const nextPieces: CargoPieceDraft[] = Array.from(
+      { length: CARGO_DETAIL_SLOTS },
+      (_, i) =>
+        loaded[i] ?? {
+          id: `piece-${i + 1}`,
+          length: '',
+          width: '',
+          height: '',
+          qty: '',
+          gross: '',
+        },
+    )
     setConsignee(item.consignee ?? '')
     setOrigin(item.origin)
     setDestination(item.destination)
-    setCargoPieces(item.cargoPieces.map((p) => ({ ...p })))
+    setCargoPieces(nextPieces)
     setBlCountDraft(String(item.blCount))
     setFxDraft(item.fxDraft)
     setCarrierCode(item.carrierCode)
@@ -827,12 +991,36 @@ export function OriginCostDeskSite() {
     setOtherUnits({ ...item.otherUnits })
     setExtraOthers(item.extraOthers.map((o) => ({ ...o })))
     setDisabledFixedOtherIds([...item.disabledFixedOtherIds])
-    setLoadedHistoryPdfHtml(item.savedPdfHtml ?? '')
-    setTab('input')
+    setRefDraft({ ...(item.refDraft ?? {}) })
   }
 
-  const duplicateQuoteFromHistory = (item: QuoteHistoryItem) => {
-    loadQuoteFromHistory(item)
+  const openQuoteFromHistory = (item: QuoteHistoryItem) => {
+    applyHistoryItem(item)
+    setLoadedHistoryPdfHtml(item.savedPdfHtml ?? '')
+    setHistoryNotice({
+      kind: 'open',
+      text: `Opened saved quote · ${item.origin}-${item.destination}${
+        item.consignee ? ` · ${item.consignee}` : ''
+      }. Reprint from PDF, or switch to Input to change it.`,
+    })
+    setTab('quote')
+  }
+
+  const reuseQuoteFromHistory = (item: QuoteHistoryItem) => {
+    applyHistoryItem(item)
+    setLoadedHistoryPdfHtml('')
+    setHistoryNotice({
+      kind: 'reuse',
+      text: `Reused “${
+        item.caseName || `${item.origin}-${item.destination}`
+      }”. Change only cargo / 예외 / Remark if this job differs, then Save PDF.`,
+    })
+    setTab('input')
+    window.setTimeout(() => {
+      const el = cellRefs.current.consignee
+      el?.focus()
+      el?.select()
+    }, 80)
   }
 
   const deleteQuoteFromHistory = (id: string) => {
@@ -846,6 +1034,254 @@ export function OriginCostDeskSite() {
 
   const chargeableWeight = cargoCbm * 167
   const effectiveCw = Math.max(cargoGross, chargeableWeight)
+  const routeKey = `${origin}-${destination}`
+  const routeIndex = master?.air.findIndex((a) => a.route === routeKey) ?? -1
+  const routeRow = master && routeIndex >= 0 ? master.air[routeIndex] : null
+  const patchSelectedRoute = (patch: Partial<NonNullable<typeof routeRow>>) => {
+    if (!master || routeIndex < 0) return
+    setMaster(patchAirRoute(master, routeIndex, patch))
+  }
+
+  const pinnedCases = useMemo(
+    () => quoteHistory.filter((row) => row.pinned),
+    [quoteHistory],
+  )
+  const recentJobs = useMemo(
+    () => quoteHistory.filter((row) => !row.pinned).slice(0, 6),
+    [quoteHistory],
+  )
+
+  const historyShown = [...filteredQuoteHistory]
+    .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)))
+    .slice(0, 40)
+  const historyPanel = (
+    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-extrabold text-slate-800">Repeat cases & history</p>
+          <p className="mt-0.5 text-[11px] font-semibold text-slate-500">
+            Pin a case once. Next jobs: click it, change only what is different, Save PDF.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            value={caseNameDraft}
+            onChange={(e) => setCaseNameDraft(e.target.value)}
+            placeholder="Case name (Chocolate KEEP COOL)"
+            className="h-10 min-w-[180px] rounded-md border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-wac-orange"
+          />
+          <button
+            type="button"
+            onClick={() => saveQuoteToHistory({ pin: true })}
+            disabled={!deskQuote}
+            className="inline-flex h-10 items-center justify-center gap-1 rounded-lg bg-wac-orange px-4 text-sm font-bold text-white hover:bg-[#d6451c] disabled:opacity-40"
+          >
+            <Pin className="h-3.5 w-3.5" />
+            Pin this case
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-3 flex items-center gap-2">
+        <div className="relative min-w-[200px] flex-1">
+          <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            value={historyQuery}
+            onChange={(e) => setHistoryQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && historyShown[0]) {
+                e.preventDefault()
+                reuseQuoteFromHistory(historyShown[0])
+              }
+            }}
+            placeholder="Search consignee, route, remark, carrier, size…"
+            className="h-10 w-full rounded-md border border-slate-200 bg-white pr-3 pl-9 text-sm font-bold outline-none focus:border-wac-orange"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => setHistoryShowAdvanced((v) => !v)}
+          className="h-10 shrink-0 rounded-md border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 hover:border-wac-orange"
+        >
+          {historyShowAdvanced ? 'Hide filters' : 'More filters'}
+        </button>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setHistorySameRoute((v) => !v)}
+          className={`h-8 rounded-full border px-3 text-[11px] font-bold ${
+            historySameRoute
+              ? 'border-wac-navy bg-wac-navy text-white'
+              : 'border-slate-200 bg-white text-slate-600'
+          }`}
+        >
+          This route {origin}-{destination}
+        </button>
+        <button
+          type="button"
+          onClick={() => setHistoryUseCurrentSize((v) => !v)}
+          className={`h-8 rounded-full border px-3 text-[11px] font-bold ${
+            historyUseCurrentSize
+              ? 'border-wac-navy bg-wac-navy text-white'
+              : 'border-slate-200 bg-white text-slate-600'
+          }`}
+        >
+          Similar size ±{historySizeTolerance || 20}%
+        </button>
+        <span className="text-[11px] font-semibold text-slate-500">
+          {filteredQuoteHistory.length} match
+          {filteredQuoteHistory.length === 1 ? '' : 'es'}
+          {filteredQuoteHistory.length > historyShown.length
+            ? ` · showing ${historyShown.length}`
+            : ''}
+        </span>
+      </div>
+
+      {historyShowAdvanced ? (
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
+          <input
+            value={historyDateFrom}
+            onChange={(e) => setHistoryDateFrom(e.target.value)}
+            type="date"
+            className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-wac-orange"
+          />
+          <input
+            value={historyDateTo}
+            onChange={(e) => setHistoryDateTo(e.target.value)}
+            type="date"
+            className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-wac-orange"
+          />
+          <input
+            value={historyMinTotal}
+            onChange={(e) => setHistoryMinTotal(e.target.value)}
+            placeholder="Min Total"
+            className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-wac-orange"
+          />
+          <input
+            value={historyMaxTotal}
+            onChange={(e) => setHistoryMaxTotal(e.target.value)}
+            placeholder="Max Total"
+            className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-wac-orange"
+          />
+          <input
+            value={historyMinGross}
+            onChange={(e) => setHistoryMinGross(e.target.value)}
+            placeholder="Min Gross"
+            className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-wac-orange"
+          />
+          <input
+            value={historyMaxGross}
+            onChange={(e) => setHistoryMaxGross(e.target.value)}
+            placeholder="Max Gross"
+            className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-wac-orange"
+          />
+          <input
+            value={historySizeTolerance}
+            onChange={(e) => setHistorySizeTolerance(e.target.value)}
+            placeholder="Size ±%"
+            className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-wac-orange"
+          />
+        </div>
+      ) : null}
+
+      <div className="mt-3 max-h-72 overflow-auto rounded-md border border-slate-100">
+        {historyShown.length === 0 ? (
+          <div className="px-3 py-4 text-center text-sm font-semibold text-slate-500">
+            {quoteHistory.length === 0
+              ? 'No cases yet. Save PDF and it is stored automatically. Pin if you will quote it again.'
+              : 'No matching history.'}
+          </div>
+        ) : (
+          historyShown.map((item) => {
+            const dims = cargoDimsText(item.cargoPieces)
+            return (
+              <div
+                key={item.id}
+                className="flex items-start justify-between gap-3 border-b border-slate-100 px-3 py-2.5 last:border-b-0"
+              >
+                <div className="min-w-0">
+                  <div className="text-sm font-extrabold text-slate-800">
+                    {item.pinned ? (
+                      <span className="mr-1.5 text-[10px] font-black tracking-wider text-slate-400">
+                        PIN
+                      </span>
+                    ) : null}
+                    {item.caseName ? (
+                      <span className="text-slate-800">{item.caseName} · </span>
+                    ) : null}
+                    {item.consignee ? (
+                      <span className="text-sky-800">{item.consignee}</span>
+                    ) : (
+                      <span className="font-semibold text-slate-400">No consignee</span>
+                    )}
+                    <span className="font-bold text-slate-500">
+                      {' '}
+                      · {item.origin}-{item.destination} · {item.currency}{' '}
+                      {item.total.toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="truncate text-xs font-semibold text-slate-500">
+                    {new Date(item.createdAt).toLocaleDateString('en-GB')}
+                    {item.carrierCode ? ` · ${item.carrierCode}` : ''}
+                    {dims ? ` · ${dims}` : ''}
+                    {` · C.W. ${item.cw.toFixed(1)}`}
+                    {item.deskRemark.trim()
+                      ? ` · ${item.deskRemark.trim()}`
+                      : ''}
+                  </div>
+                </div>
+                <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => reuseQuoteFromHistory(item)}
+                    className="inline-flex h-9 items-center justify-center rounded-md bg-wac-orange px-3 text-sm font-bold text-white hover:bg-[#d6451c]"
+                  >
+                    Reuse
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => togglePinHistory(item.id)}
+                    className={`inline-flex h-9 items-center justify-center rounded-md border px-3 text-sm font-bold ${
+                      item.pinned
+                        ? 'border-wac-orange bg-orange-50 text-wac-orange'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-wac-orange'
+                    }`}
+                  >
+                    {item.pinned ? 'Unpin' : 'Pin'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openQuoteFromHistory(item)}
+                    className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:border-wac-orange"
+                  >
+                    Open
+                  </button>
+                  {item.savedPdfHtml ? (
+                    <button
+                      type="button"
+                      onClick={() => printQuotation(item.savedPdfHtml!)}
+                      className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:border-wac-orange"
+                    >
+                      PDF
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => deleteQuoteFromHistory(item.id)}
+                    className="inline-flex h-9 items-center justify-center rounded-md border border-red-200 bg-white px-3 text-sm font-bold text-red-600 hover:bg-red-50"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            )
+          })
+        )}
+      </div>
+    </div>
+  )
 
   return (
     <div className="min-h-screen bg-[#F7ECEB] font-sans text-wac-navy">
@@ -1025,7 +1461,7 @@ export function OriginCostDeskSite() {
               <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
                 <Loader2 className="mx-auto mb-4 h-10 w-10 animate-spin text-wac-orange" />
                 <p className="text-sm font-semibold text-slate-600">
-                  Master_DB loading?
+                  Master_DB loading...
                 </p>
               </div>
             )}
@@ -1034,6 +1470,78 @@ export function OriginCostDeskSite() {
 
         {tab === 'input' ? (
           <div className="space-y-5">
+            {historyNotice ? (
+              <div
+                className={`rounded-xl border px-4 py-3 text-sm font-semibold ${
+                  historyNotice.kind === 'reuse'
+                    ? 'border-orange-200 bg-orange-50 text-wac-navy'
+                    : 'border-slate-200 bg-white text-slate-700'
+                }`}
+              >
+                {historyNotice.text}
+              </div>
+            ) : null}
+            {pinnedCases.length > 0 || recentJobs.length > 0 ? (
+              <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                {pinnedCases.length > 0 ? (
+                  <div>
+                    <p className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">
+                      Repeat cases — click, then change only what is different
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {pinnedCases.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => reuseQuoteFromHistory(item)}
+                          className="inline-flex h-9 items-center rounded-full bg-wac-navy px-3 text-[12px] font-bold text-white hover:bg-[#243447]"
+                        >
+                          {item.consignee ? (
+                            <span className="text-orange-300">{item.consignee}</span>
+                          ) : null}
+                          <span className={item.consignee ? 'ml-1.5 text-white/85' : ''}>
+                            {item.caseName || `${item.origin}-${item.destination}`}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {recentJobs.length > 0 ? (
+                  <div className={pinnedCases.length > 0 ? 'mt-3' : ''}>
+                    <p className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">
+                      Recent
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {recentJobs.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => reuseQuoteFromHistory(item)}
+                          className="inline-flex h-9 items-center rounded-full border border-slate-200 bg-white px-3 text-[12px] font-bold text-slate-700 hover:border-wac-orange"
+                        >
+                          {item.consignee ? (
+                            <span className="text-sky-800">{item.consignee}</span>
+                          ) : (
+                            <span>
+                              {item.origin}-{item.destination}
+                            </span>
+                          )}
+                          {item.consignee ? (
+                            <span className="ml-1 font-bold text-slate-500">
+                              {item.origin}-{item.destination}
+                            </span>
+                          ) : null}
+                          <span className="ml-1 font-semibold text-slate-400">
+                            {item.currency} {item.total.toFixed(0)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <form
               className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
               onSubmit={(e) => {
@@ -1393,7 +1901,7 @@ export function OriginCostDeskSite() {
                     <tr className="border-t border-slate-200">
                       <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">+ Break</th>
                       <td className="bg-white px-3 py-2 text-center font-bold text-slate-600">
-                        {deskQuote ? deskQuote.breakLabel.replace('+', '+') : ''}
+                        {deskQuote ? deskQuote.breakLabel : ''}
                       </td>
                       <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">Air Rate</th>
                       <td className="bg-white px-3 py-2 text-center font-bold text-slate-600">
@@ -1402,21 +1910,103 @@ export function OriginCostDeskSite() {
                     </tr>
                     <tr className="border-t border-slate-200">
                       <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">Air MIN</th>
-                      <td className="bg-white px-3 py-2 text-center font-bold text-slate-600">
-                        {deskQuote ? deskQuote.airMin.toFixed(2) : ''}
+                      <td className="bg-[#FFFBEA] px-2 py-2">
+                        {routeRow ? (
+                          <NumericCell
+                            value={routeRow.min}
+                            onCommit={(n) => patchSelectedRoute({ min: n })}
+                            className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center font-bold outline-none focus:border-wac-orange"
+                          />
+                        ) : (
+                          <span className="block text-center font-bold text-slate-600">
+                            {deskQuote ? deskQuote.airMin.toFixed(2) : ''}
+                          </span>
+                        )}
                       </td>
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">FSC/kg</th>
-                      <td className="bg-white px-3 py-2 text-center font-bold text-slate-600">
-                        {deskQuote ? deskQuote.fscPerKg.toFixed(2) : ''}
+                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">-45</th>
+                      <td className="bg-[#FFFBEA] px-2 py-2">
+                        {routeRow ? (
+                          <NumericCell
+                            value={routeRow.rUnder45}
+                            onCommit={(n) => patchSelectedRoute({ rUnder45: n })}
+                            className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center font-bold outline-none focus:border-wac-orange"
+                          />
+                        ) : null}
                       </td>
                     </tr>
                     <tr className="border-t border-slate-200">
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">SSC/kg</th>
-                      <td className="bg-white px-3 py-2 text-center font-bold text-slate-600">
-                        {deskQuote ? deskQuote.sscPerKg.toFixed(2) : ''}
+                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">+45</th>
+                      <td className="bg-[#FFFBEA] px-2 py-2">
+                        {routeRow ? (
+                          <NumericCell
+                            value={routeRow.r45}
+                            onCommit={(n) => patchSelectedRoute({ r45: n })}
+                            className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center font-bold outline-none focus:border-wac-orange"
+                          />
+                        ) : null}
                       </td>
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase"> </th>
-                      <td className="bg-white px-3 py-2" />
+                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">+100</th>
+                      <td className="bg-[#FFFBEA] px-2 py-2">
+                        {routeRow ? (
+                          <NumericCell
+                            value={routeRow.r100}
+                            onCommit={(n) => patchSelectedRoute({ r100: n })}
+                            className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center font-bold outline-none focus:border-wac-orange"
+                          />
+                        ) : null}
+                      </td>
+                    </tr>
+                    <tr className="border-t border-slate-200">
+                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">+500</th>
+                      <td className="bg-[#FFFBEA] px-2 py-2">
+                        {routeRow ? (
+                          <NumericCell
+                            value={routeRow.r500}
+                            onCommit={(n) => patchSelectedRoute({ r500: n })}
+                            className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center font-bold outline-none focus:border-wac-orange"
+                          />
+                        ) : null}
+                      </td>
+                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">+1000</th>
+                      <td className="bg-[#FFFBEA] px-2 py-2">
+                        {routeRow ? (
+                          <NumericCell
+                            value={routeRow.r1000}
+                            onCommit={(n) => patchSelectedRoute({ r1000: n })}
+                            className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center font-bold outline-none focus:border-wac-orange"
+                          />
+                        ) : null}
+                      </td>
+                    </tr>
+                    <tr className="border-t border-slate-200">
+                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">FSC/kg</th>
+                      <td className="bg-[#FFFBEA] px-2 py-2">
+                        {routeRow ? (
+                          <NumericCell
+                            value={routeRow.fsc}
+                            onCommit={(n) => patchSelectedRoute({ fsc: n })}
+                            className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center font-bold outline-none focus:border-wac-orange"
+                          />
+                        ) : (
+                          <span className="block text-center font-bold text-slate-600">
+                            {deskQuote ? deskQuote.fscPerKg.toFixed(2) : ''}
+                          </span>
+                        )}
+                      </td>
+                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">SSC/kg</th>
+                      <td className="bg-[#FFFBEA] px-2 py-2">
+                        {routeRow ? (
+                          <NumericCell
+                            value={routeRow.ssc}
+                            onCommit={(n) => patchSelectedRoute({ ssc: n })}
+                            className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center font-bold outline-none focus:border-wac-orange"
+                          />
+                        ) : (
+                          <span className="block text-center font-bold text-slate-600">
+                            {deskQuote ? deskQuote.sscPerKg.toFixed(2) : ''}
+                          </span>
+                        )}
+                      </td>
                     </tr>
                   </tbody>
                 </table>
@@ -1428,7 +2018,7 @@ export function OriginCostDeskSite() {
                   disabled={isLoading || !master}
                   className="flex h-11 items-center justify-center gap-2 rounded-lg bg-wac-orange px-4 text-sm font-bold text-white shadow-lg shadow-[#F05023]/25 disabled:opacity-60"
                 >
-                  {isLoading ? 'Calculating?' : 'Calculate'}
+                  {isLoading ? 'Calculating...' : 'Calculate'}
                 </button>
               </div>
             </form>
@@ -1480,8 +2070,9 @@ export function OriginCostDeskSite() {
                     </thead>
                     <tbody>
                       {deskQuote?.lines.map((l, idx) => {
-                        const showLabelInput = l.editableLabel || l.isOtherSlot
-                        const showUnitInput = l.editableUnit || l.isOtherSlot
+                        const showLabelInput = Boolean(l.editableLabel)
+                        const showUnitInput = Boolean(l.editableUnit)
+                        const showRefInput = Boolean(l.editableRef)
                         const thisLabelCellId = `${l.id}-label`
                         const thisUnitCellId = `${l.id}-unit`
                         const thisExcCellId = `${l.id}-exc`
@@ -1510,14 +2101,6 @@ export function OriginCostDeskSite() {
                           ? `${nextLineId}-exc`
                           : undefined
                         const isDynamicOther = extraOthers.some((row) => row.id === l.id)
-                        const isFixedOther =
-                          !isDynamicOther &&
-                          l.isOtherSlot &&
-                          /^other\d+$/.test(l.id) &&
-                          (() => {
-                            const n = Number(l.id.replace('other', ''))
-                            return Number.isFinite(n) && n >= 1 && n <= TOTAL_OTHER_SLOTS
-                          })()
 
                         return (
                           <tr key={l.id} className="border-t border-slate-100">
@@ -1562,11 +2145,7 @@ export function OriginCostDeskSite() {
                                     cellRefs.current[thisUnitCellId] = el
                                   }}
                                   type="text"
-                                  value={
-                                    l.isOtherSlot
-                                      ? otherUnits[l.id] ?? l.unit
-                                      : l.unit
-                                  }
+                                  value={otherUnits[l.id] ?? l.unit}
                                   onChange={(e) =>
                                     setOtherUnits((u) => ({
                                       ...u,
@@ -1589,7 +2168,33 @@ export function OriginCostDeskSite() {
                               )}
                             </td>
                             <td className="px-3 py-2.5 text-right text-slate-700">
-                              {l.ref.toFixed(2)}
+                              {showRefInput ? (
+                                <input
+                                  ref={(el) => {
+                                    cellRefs.current[`${l.id}-ref`] = el
+                                  }}
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={refDraft[l.id] ?? l.ref.toFixed(2)}
+                                  onChange={(e) =>
+                                    setRefDraft((d) => ({
+                                      ...d,
+                                      [l.id]: normalizeNumberDraft(e.target.value),
+                                    }))
+                                  }
+                                  onKeyDown={(e) =>
+                                    handleCellNav(e, {
+                                      enter: thisExcCellId,
+                                      down: thisExcCellId,
+                                      left: thisUnitCellId,
+                                      right: thisExcCellId,
+                                    })
+                                  }
+                                  className="h-9 w-full rounded border border-slate-200 bg-white px-2 text-right text-[12px] outline-none focus:border-wac-orange"
+                                />
+                              ) : (
+                                l.ref.toFixed(2)
+                              )}
                             </td>
                             <td className="px-3 py-2.5 text-right">
                               <input
@@ -1598,7 +2203,7 @@ export function OriginCostDeskSite() {
                                 }}
                                 type="text"
                                 inputMode="decimal"
-                                placeholder="?"
+                                placeholder=""
                                 value={exceptionDraft[l.id] ?? ''}
                                 onKeyDown={(e) =>
                                   handleCellNav(e, {
@@ -1623,20 +2228,13 @@ export function OriginCostDeskSite() {
                               {l.amount.toFixed(2)}
                             </td>
                             <td className="px-3 py-2.5 text-center">
-                              {l.isOtherSlot ? (
+                              {isDynamicOther ? (
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    if (isDynamicOther) {
-                                      setExtraOthers((rows) =>
-                                        rows.filter((row) => row.id !== l.id),
-                                      )
-                                    } else if (isFixedOther) {
-                                      setDisabledFixedOtherIds((ids) => {
-                                        if (ids.includes(l.id)) return ids
-                                        return [...ids, l.id]
-                                      })
-                                    }
+                                    setExtraOthers((rows) =>
+                                      rows.filter((row) => row.id !== l.id),
+                                    )
                                   }}
                                   className="inline-flex h-8 w-8 items-center justify-center rounded border border-slate-200 text-slate-400 hover:border-red-300 hover:text-red-500"
                                   aria-label="Remove other"
@@ -1684,6 +2282,9 @@ export function OriginCostDeskSite() {
                         value={fxDraft}
                         onChange={(e) => setFxDraft(normalizeNumberDraft(e.target.value))}
                       />
+                      <p className="mt-1 text-[10px] text-slate-500">
+                        Excel과 동일: Currency가 HKD이면 TOTAL × Ex.Rate (USD는 그대로)
+                      </p>
                     </div>
                     <div className="bg-[#F4F7FB] px-3 py-2 text-xs font-bold text-slate-600">Route</div>
                     <div className="px-3 py-2 text-sm font-bold text-slate-800">{deskQuote?.route}</div>
@@ -1725,7 +2326,7 @@ export function OriginCostDeskSite() {
                         className="h-9 w-full rounded-md border border-amber-200 bg-white px-2 text-sm font-bold text-slate-800 shadow-sm outline-none focus:border-wac-orange"
                         value={deskRemark}
                         onChange={(e) => setDeskRemark(e.target.value)}
-                        placeholder="KEEP COOL / 2–8°C"
+                        placeholder=""
                       />
                     </div>
                   </div>
@@ -1741,15 +2342,21 @@ export function OriginCostDeskSite() {
                 </div>
               </div>
             )}
+            {historyPanel}
           </div>
         ) : null}
 
         {tab === 'quote' ? (
           <div className="space-y-4">
+            {historyNotice?.kind === 'open' ? (
+              <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">
+                {historyNotice.text}
+              </div>
+            ) : null}
             {!deskQuote ? (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
                 <p className="text-sm font-semibold text-slate-600">
-                  Calculate in Input tab first.
+                  No live quote yet. Reuse a history row into Input, or calculate from Input.
                 </p>
               </div>
             ) : (
@@ -1764,7 +2371,7 @@ export function OriginCostDeskSite() {
                         {deskQuote.currency} {deskQuote.total.toFixed(2)}
                       </p>
                       <p className="mt-1 text-sm text-slate-600">
-                        Route {deskQuote.route} · Break {esc(deskQuote.breakLabel)} ·
+                        Route {deskQuote.route} · Break {deskQuote.breakLabel} ·
                         C.W. {deskQuote.cw.toFixed(2)} / CBM {deskQuote.cbm.toFixed(3)}
                       </p>
                     </div>
@@ -1806,7 +2413,7 @@ export function OriginCostDeskSite() {
 
                     <div className="bg-[#F4F7FB] px-3 py-2 text-xs font-bold text-slate-600">C.W.</div>
                     <div className="px-3 py-2 text-sm font-extrabold text-emerald-800 bg-emerald-50 rounded">
-                      {deskQuote.cw.toFixed(2)} kg · Break {esc(deskQuote.breakLabel)}
+                      {deskQuote.cw.toFixed(2)} kg · Break {deskQuote.breakLabel}
                     </div>
 
                     <div className="bg-[#F4F7FB] px-3 py-2 text-xs font-bold text-slate-600">Currency / FX</div>
@@ -1869,156 +2476,6 @@ export function OriginCostDeskSite() {
                       </tbody>
                     </table>
                   </div>
-                  <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <p className="text-sm font-extrabold text-slate-800">
-                        Similar Quotes (History)
-                      </p>
-                      <button
-                        type="button"
-                        onClick={saveQuoteToHistory}
-                        className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 hover:border-wac-orange"
-                      >
-                        Save to history
-                      </button>
-                    </div>
-
-                    <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
-                      <input
-                        value={historyConsigneeQuery}
-                        onChange={(e) => setHistoryConsigneeQuery(e.target.value)}
-                        placeholder="Consignee"
-                        className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-wac-orange"
-                      />
-                      <input
-                        value={historyRouteQuery}
-                        onChange={(e) => setHistoryRouteQuery(e.target.value)}
-                        placeholder="Route (HKG-ICN)"
-                        className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-wac-orange"
-                      />
-                      <input
-                        value={historyDateFrom}
-                        onChange={(e) => setHistoryDateFrom(e.target.value)}
-                        type="date"
-                        className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-wac-orange"
-                      />
-                      <input
-                        value={historyDateTo}
-                        onChange={(e) => setHistoryDateTo(e.target.value)}
-                        type="date"
-                        className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-wac-orange"
-                      />
-                      <input
-                        value={historyMinTotal}
-                        onChange={(e) => setHistoryMinTotal(e.target.value)}
-                        placeholder="Min Total"
-                        className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-wac-orange"
-                      />
-                      <input
-                        value={historyMaxTotal}
-                        onChange={(e) => setHistoryMaxTotal(e.target.value)}
-                        placeholder="Max Total"
-                        className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-wac-orange"
-                      />
-                      <input
-                        value={historyMinGross}
-                        onChange={(e) => setHistoryMinGross(e.target.value)}
-                        placeholder="Min Gross"
-                        className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-wac-orange"
-                      />
-                      <input
-                        value={historyMaxGross}
-                        onChange={(e) => setHistoryMaxGross(e.target.value)}
-                        placeholder="Max Gross"
-                        className="h-10 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-wac-orange"
-                      />
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap items-center gap-3">
-                      <label className="inline-flex items-center gap-2 text-sm font-bold text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={historyUseCurrentSize}
-                          onChange={(e) =>
-                            setHistoryUseCurrentSize(e.target.checked)
-                          }
-                        />
-                        Similar size to current quote
-                      </label>
-                      <input
-                        value={historySizeTolerance}
-                        onChange={(e) => setHistorySizeTolerance(e.target.value)}
-                        placeholder="Tolerance %"
-                        className="h-10 w-32 rounded-md border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-wac-orange"
-                      />
-                      <div className="text-xs font-semibold text-slate-500">
-                        Matches history by current `CBM` and `C.W.` within the
-                        tolerance.
-                      </div>
-                    </div>
-
-                    <div className="mt-3 max-h-60 overflow-auto rounded-md border border-slate-100">
-                      {filteredQuoteHistory.length === 0 ? (
-                        <div className="px-3 py-4 text-center text-sm font-semibold text-slate-500">
-                          No matching history.
-                        </div>
-                      ) : (
-                        filteredQuoteHistory.slice(0, 30).map((item) => (
-                          <div
-                            key={item.id}
-                            className="flex items-start justify-between gap-3 border-b border-slate-100 px-3 py-2.5 last:border-b-0"
-                          >
-                            <div>
-                              <div className="text-sm font-extrabold text-slate-800">
-                                {item.consignee ? `${item.consignee} · ` : ''}
-                                {item.origin}-{item.destination} · {item.currency}{' '}
-                                {item.total.toFixed(2)}
-                              </div>
-                              <div className="text-xs font-semibold text-slate-500">
-                                {new Date(item.createdAt).toLocaleDateString(
-                                  'en-GB',
-                                )}{' '}
-                                · CBM {item.cbm.toFixed(3)} · C.W.{' '}
-                                {item.cw.toFixed(2)}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {item.savedPdfHtml ? (
-                                <button
-                                  type="button"
-                                  onClick={() => printQuotation(item.savedPdfHtml!)}
-                                  className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:border-wac-orange"
-                                >
-                                  PDF
-                                </button>
-                              ) : null}
-                              <button
-                                type="button"
-                                onClick={() => loadQuoteFromHistory(item)}
-                                className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:border-wac-orange"
-                              >
-                                Load
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => duplicateQuoteFromHistory(item)}
-                                className="inline-flex h-9 items-center justify-center rounded-md border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 hover:border-wac-orange"
-                              >
-                                Duplicate
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => deleteQuoteFromHistory(item.id)}
-                                className="inline-flex h-9 items-center justify-center rounded-md border border-red-200 bg-white px-3 text-sm font-bold text-red-600 hover:bg-red-50"
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
                   <div className="flex justify-start border-t border-slate-100 bg-white px-5 py-4">
                     <button
                       type="button"
@@ -2031,6 +2488,7 @@ export function OriginCostDeskSite() {
                 </div>
               </>
             )}
+            {historyPanel}
           </div>
         ) : null}
       </main>
@@ -2038,4 +2496,3 @@ export function OriginCostDeskSite() {
     </div>
   )
 }
-
