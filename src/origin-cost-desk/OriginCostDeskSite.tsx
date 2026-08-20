@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, Fragment, type ClipboardEvent as ReactClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import * as XLSX from 'xlsx'
 import { FileSpreadsheet, Loader2, Pin, Plus, Search, Trash2 } from 'lucide-react'
-import { CmMasterEditor, NumericCell } from './components/CmMasterEditor'
+import { CmMasterEditor } from './components/CmMasterEditor'
 import {
   calcCmDeskQuote,
   parseCmExceptions,
@@ -18,7 +18,7 @@ import { filterLinesForPdf } from './cmDeskPdf'
 import { buildCmDeskPlainTable, buildCmDeskQuotationHtml } from './cmDeskDocument'
 import { printQuotation } from '../quoteDocument'
 import { type CmExtraOther } from './cmDeskConfig'
-import { addAirRoute, patchAirRoute } from './cmMasterEdit'
+import { addAirRoute } from './cmMasterEdit'
 
 type TabKey = 'master' | 'input' | 'quote'
 type CargoPieceDraft = {
@@ -1080,10 +1080,6 @@ export function OriginCostDeskSite() {
   const routeKey = `${origin}-${destination}`
   const routeIndex = master?.air.findIndex((a) => a.route === routeKey) ?? -1
   const routeRow = master && routeIndex >= 0 ? master.air[routeIndex] : null
-  const patchSelectedRoute = (patch: Partial<NonNullable<typeof routeRow>>) => {
-    if (!master || routeIndex < 0) return
-    setMaster(patchAirRoute(master, routeIndex, patch))
-  }
 
   const pinnedCases = useMemo(
     () => quoteHistory.filter((row) => row.pinned),
@@ -1981,17 +1977,13 @@ export function OriginCostDeskSite() {
                     <tr className="border-t border-slate-200">
                       <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">Air MIN</th>
                       <td className="bg-[#FFFBEA] px-2 py-2">
-                        {routeRow ? (
-                          <NumericCell
-                            value={routeRow.min}
-                            onCommit={(n) => patchSelectedRoute({ min: n })}
-                            className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center font-bold outline-none focus:border-wac-orange"
-                          />
-                        ) : (
-                          <span className="block text-center font-bold text-slate-600">
-                            {deskQuote ? deskQuote.airMin.toFixed(2) : ''}
-                          </span>
-                        )}
+                        <span className="block text-center font-bold text-slate-600">
+                          {routeRow
+                            ? routeRow.min.toFixed(2)
+                            : deskQuote
+                              ? deskQuote.airMin.toFixed(2)
+                              : ''}
+                        </span>
                       </td>
                       {master?.breaks[0] ? (
                         <>
@@ -2005,17 +1997,9 @@ export function OriginCostDeskSite() {
                                 : 'bg-[#FFFBEA]'
                             }`}
                           >
-                            {routeRow ? (
-                              <NumericCell
-                                value={routeRow.rates[0] ?? 0}
-                                onCommit={(n) => {
-                                  const rates = [...routeRow.rates]
-                                  rates[0] = n
-                                  patchSelectedRoute({ rates })
-                                }}
-                                className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center font-bold outline-none focus:border-wac-orange"
-                              />
-                            ) : null}
+                            <span className="block text-center font-bold text-slate-800">
+                              {routeRow ? (routeRow.rates[0] ?? 0).toFixed(2) : ''}
+                            </span>
                           </td>
                         </>
                       ) : (
@@ -2045,17 +2029,9 @@ export function OriginCostDeskSite() {
                                     active ? 'bg-emerald-50' : 'bg-[#FFFBEA]'
                                   }`}
                                 >
-                                  {routeRow ? (
-                                    <NumericCell
-                                      value={routeRow.rates[bi] ?? 0}
-                                      onCommit={(n) => {
-                                        const rates = [...routeRow.rates]
-                                        rates[bi] = n
-                                        patchSelectedRoute({ rates })
-                                      }}
-                                      className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center font-bold outline-none focus:border-wac-orange"
-                                    />
-                                  ) : null}
+                                  <span className="block text-center font-bold text-slate-800">
+                                    {routeRow ? (routeRow.rates[bi] ?? 0).toFixed(2) : ''}
+                                  </span>
                                 </td>
                               </Fragment>
                             )
@@ -2072,31 +2048,15 @@ export function OriginCostDeskSite() {
                     <tr className="border-t border-slate-200">
                       <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">FSC/kg</th>
                       <td className="bg-[#FFFBEA] px-2 py-2">
-                        {routeRow ? (
-                          <NumericCell
-                            value={routeRow.fsc}
-                            onCommit={(n) => patchSelectedRoute({ fsc: n })}
-                            className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center font-bold outline-none focus:border-wac-orange"
-                          />
-                        ) : (
-                          <span className="block text-center font-bold text-slate-600">
-                            {deskQuote ? deskQuote.fscPerKg.toFixed(2) : ''}
-                          </span>
-                        )}
+                        <span className="block text-center font-bold text-slate-600">
+                          {routeRow ? routeRow.fsc.toFixed(2) : deskQuote ? deskQuote.fscPerKg.toFixed(2) : ''}
+                        </span>
                       </td>
                       <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">SSC/kg</th>
                       <td className="bg-[#FFFBEA] px-2 py-2">
-                        {routeRow ? (
-                          <NumericCell
-                            value={routeRow.ssc}
-                            onCommit={(n) => patchSelectedRoute({ ssc: n })}
-                            className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center font-bold outline-none focus:border-wac-orange"
-                          />
-                        ) : (
-                          <span className="block text-center font-bold text-slate-600">
-                            {deskQuote ? deskQuote.sscPerKg.toFixed(2) : ''}
-                          </span>
-                        )}
+                        <span className="block text-center font-bold text-slate-600">
+                          {routeRow ? routeRow.ssc.toFixed(2) : deskQuote ? deskQuote.sscPerKg.toFixed(2) : ''}
+                        </span>
                       </td>
                     </tr>
                   </tbody>
