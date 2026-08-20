@@ -1,6 +1,7 @@
 import { Plus, Trash2 } from 'lucide-react'
 import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { CmAirRate, CmMaster } from '../cmExcelMaster'
+import { breakThresholdHint } from '../cmExcelMaster'
 import {
   addAirRoute,
   addLocalCharge,
@@ -11,7 +12,6 @@ import {
   removeAirRoute,
   removeLocalCharge,
   removeWeightBreak,
-  resetGcrBreaks,
 } from '../cmMasterEdit'
 
 export function NumericCell({
@@ -60,6 +60,7 @@ type Props = {
 export function CmMasterEditor({ master, onChange }: Props) {
   const cellRefs = useRef<Record<string, HTMLInputElement | HTMLSelectElement | null>>({})
   const [newBreakKg, setNewBreakKg] = useState('300')
+  const [breakNotice, setBreakNotice] = useState('')
 
   const focusCell = (id?: string) => {
     if (!id) return
@@ -120,7 +121,14 @@ export function CmMasterEditor({ master, onChange }: Props) {
 
   const addBreakFromDraft = () => {
     const n = Number(newBreakKg)
-    onChange(addWeightBreak(master, Number.isFinite(n) ? n : 300))
+    const kg = Number.isFinite(n) ? Math.max(0, n) : 300
+    const next = addWeightBreak(master, kg)
+    if (!next) {
+      setBreakNotice(`Already have a column at ${kg} kg`)
+      return
+    }
+    setBreakNotice('')
+    onChange(next)
   }
 
   return (
@@ -132,8 +140,9 @@ export function CmMasterEditor({ master, onChange }: Props) {
               Air routes (Master_DB)
             </p>
             <p className="mt-1 max-w-2xl text-[11px] leading-relaxed text-slate-500">
-              Default GCR breaks are -45 / +45 / +100 / +500 / +1000. Add +300, +2000,
-              or a single FLAT column for contract rates. Route codes are editable.
+              <strong>-45</strong> = under the next tier (GCR: under 45 kg). It uses{' '}
+              <strong>from kg 0</strong> because the engine picks the highest tier where C.W.
+              ≥ threshold. One column only → FLAT (same rate for all weights).
             </p>
           </div>
           <button
@@ -148,7 +157,7 @@ export function CmMasterEditor({ master, onChange }: Props) {
 
         <div className="mx-4 mt-3 flex flex-wrap items-end gap-2 rounded-xl bg-slate-50 px-3 py-2">
           <label className="text-[10px] font-bold tracking-wider text-slate-500 uppercase">
-            New break (kg)
+            From (kg)
             <input
               type="text"
               inputMode="numeric"
@@ -160,6 +169,7 @@ export function CmMasterEditor({ master, onChange }: Props) {
                   addBreakFromDraft()
                 }
               }}
+              placeholder="300"
               className="mt-1 block h-8 w-24 rounded border border-slate-200 bg-white px-2 text-[11px] font-bold outline-none focus:border-wac-orange"
             />
           </label>
@@ -169,22 +179,11 @@ export function CmMasterEditor({ master, onChange }: Props) {
             className="inline-flex h-8 items-center gap-1 rounded-lg bg-wac-navy px-3 text-[10px] font-bold text-white uppercase"
           >
             <Plus className="h-3 w-3" />
-            Add column
+            Add break
           </button>
-          <button
-            type="button"
-            onClick={() => onChange(addWeightBreak(master, 0))}
-            className="inline-flex h-8 items-center rounded-lg border border-slate-200 bg-white px-3 text-[10px] font-bold text-slate-700 uppercase"
-          >
-            Add FLAT
-          </button>
-          <button
-            type="button"
-            onClick={() => onChange(resetGcrBreaks(master))}
-            className="inline-flex h-8 items-center rounded-lg border border-slate-200 bg-white px-3 text-[10px] font-bold text-slate-700 uppercase"
-          >
-            Reset GCR
-          </button>
+          {breakNotice ? (
+            <p className="text-[10px] font-semibold text-amber-700">{breakNotice}</p>
+          ) : null}
         </div>
 
         <div className="mt-3 overflow-x-auto border-t border-slate-100">
@@ -195,14 +194,9 @@ export function CmMasterEditor({ master, onChange }: Props) {
                 <th className="px-2 py-2 align-bottom">MIN</th>
                 {master.breaks.map((br, bi) => (
                   <th key={br.id} className="min-w-[88px] px-2 py-2">
-                    <input
-                      type="text"
-                      value={br.label}
-                      onChange={(e) =>
-                        onChange(patchWeightBreak(master, bi, { label: e.target.value }))
-                      }
-                      className="mb-1 h-6 w-full rounded border border-white/20 bg-white/10 px-1 text-center text-[10px] font-bold uppercase text-white outline-none focus:border-wac-orange"
-                    />
+                    <p className="mb-1 text-center text-[11px] font-bold uppercase text-white">
+                      {br.label}
+                    </p>
                     <div className="flex items-center gap-1">
                       <NumericCell
                         value={br.minKg}
@@ -222,7 +216,7 @@ export function CmMasterEditor({ master, onChange }: Props) {
                       </button>
                     </div>
                     <p className="mt-0.5 text-center text-[8px] font-semibold normal-case tracking-normal text-white/50">
-                      ≥ {br.minKg}kg
+                      {breakThresholdHint(br, master.breaks)}
                     </p>
                   </th>
                 ))}
@@ -515,9 +509,9 @@ export function CmMasterEditor({ master, onChange }: Props) {
       </div>
 
       <p className="text-[10px] leading-relaxed text-slate-500">
-        Break columns and routes stay in this browser until you Import xlsx or Reload
-        Excel default. Highest matching kg wins (e.g. C.W. 220 uses +100, not +45).
-        Flat rate: keep one FLAT column at 0kg and remove the others.
+        Change the <strong>from (kg)</strong> threshold to add contract tiers (+300, +2000).
+        Grey hint updates with it. Duplicate kg is ignored. Master comes from the bundled Excel
+        on deploy — use Import Master_DB to replace from a file.
       </p>
     </div>
   )

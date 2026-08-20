@@ -22,7 +22,7 @@ Node 22+ recommended.
 
 ## Daily workflow
 
-1. **Master_DB** — yellow cells are live rates. Add/rename airline routes. Weight-break **columns** are not hardcoded: add +300 / +2000 / FLAT, or Reset GCR. Edits persist in this browser (`localStorage`); Import xlsx or Reload Excel default replaces them.
+1. **Master_DB** — yellow cells are live rates. Add/rename airline routes. Weight-break **from (kg)** sets the tier; label (-45 / +100 / FLAT) follows automatically. Master loads from bundled Excel — update that file before deploy to ship new rates.
 2. **Input** — cargo, route, 비용 내역. Local charge **names** come from Master. Edit **unit** and **참고** by hand. **예외(J)** overrides 참고.
 3. Repeat cases: **Pin this case** once (e.g. Chocolate KEEP COOL). Next time click it at the top of Input, change only cargo / 예외 / remark, then Save PDF.
 4. **Save PDF** also writes history in this browser (`localStorage`). Same case is upserted, not duplicated.

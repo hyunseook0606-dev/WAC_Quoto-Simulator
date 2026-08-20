@@ -81,6 +81,32 @@ export function parseBreakHeader(raw: string, index: number): CmWeightBreak | nu
   }
 }
 
+export function formatBreakLabel(minKg: number, breakCount: number): string {
+  if (breakCount === 1) return 'FLAT'
+  if (minKg === 0) return '-45'
+  return `+${minKg}`
+}
+
+/** UI hint: what C.W. range this column covers. */
+export function breakThresholdHint(br: CmWeightBreak, breaks: CmWeightBreak[]): string {
+  if (breaks.length === 1) return 'All weights (flat rate)'
+  const sorted = [...breaks].sort((a, b) => a.minKg - b.minKg)
+  const idx = sorted.findIndex((b) => b.id === br.id)
+  const next = sorted[idx + 1]
+  if (br.minKg === 0 && next) {
+    return `Under ${next.minKg} kg`
+  }
+  return `C.W. ≥ ${br.minKg} kg`
+}
+
+export function syncBreakLabels(breaks: CmWeightBreak[]): CmWeightBreak[] {
+  const n = breaks.length
+  return breaks.map((b) => ({
+    ...b,
+    label: formatBreakLabel(b.minKg, n),
+  }))
+}
+
 export function pickWeightBreak(
   cw: number,
   breaks: CmWeightBreak[],
@@ -100,40 +126,25 @@ export function rateForBreak(
   return air.rates[i] ?? 0
 }
 
-function alignRateArray(rates: number[] | undefined, count: number): number[] {
-  const next = (rates ?? []).slice(0, count)
-  while (next.length < count) next.push(0)
-  return next
-}
-
-export function isPersistedMaster(value: unknown): value is CmMaster {
-  if (!value || typeof value !== 'object') return false
-  const m = value as Partial<CmMaster>
-  return (
-    Array.isArray(m.breaks) &&
-    m.breaks.length > 0 &&
-    m.breaks.every(
-      (b) =>
-        b &&
-        typeof b.id === 'string' &&
-        typeof b.minKg === 'number' &&
-        Number.isFinite(b.minKg) &&
-        typeof b.label === 'string',
-    ) &&
-    Array.isArray(m.air) &&
-    m.air.length > 0 &&
-    Array.isArray(m.local)
-  )
-}
-
 export function normalizeMaster(master: CmMaster): CmMaster {
-  const breaks = (master.breaks?.length ? master.breaks : DEFAULT_GCR_BREAKS).map(
-    (b, i) => ({
-      id: b.id || `wb-${i}`,
-      minKg: Math.max(0, Number(b.minKg) || 0),
-      label: String(b.label || `+${b.minKg || 0}`),
-    }),
-  )
+  const raw = master.breaks?.length ? master.breaks : DEFAULT_GCR_BREAKS
+  const byKg = new Map<number, { break: CmWeightBreak; sourceIndex: number }>()
+  for (let i = 0; i < raw.length; i++) {
+    const b = raw[i]
+    const minKg = Math.max(0, Number(b.minKg) || 0)
+    if (!byKg.has(minKg)) {
+      byKg.set(minKg, {
+        break: {
+          id: b.id || `wb-${minKg}`,
+          minKg,
+          label: b.label,
+        },
+        sourceIndex: i,
+      })
+    }
+  }
+  const entries = [...byKg.values()].sort((a, b) => a.break.minKg - b.break.minKg)
+  const breaks = syncBreakLabels(entries.map((e) => e.break))
   return {
     volFactor: master.volFactor || 167,
     cbmDivisor: master.cbmDivisor || 1_000_000,
@@ -141,7 +152,11 @@ export function normalizeMaster(master: CmMaster): CmMaster {
     air: master.air.map((row) => ({
       route: String(row.route || '').trim().toUpperCase(),
       min: Number(row.min) || 0,
-      rates: alignRateArray(row.rates, breaks.length),
+      rates: breaks.map((nb) => {
+        const entry = entries.find((e) => e.break.minKg === nb.minKg)
+        const i = entry?.sourceIndex ?? -1
+        return i >= 0 ? (row.rates[i] ?? 0) : 0
+      }),
       fsc: Number(row.fsc) || 0,
       ssc: Number(row.ssc) || 0,
       currency: row.currency === 'HKD' ? 'HKD' : 'USD',

@@ -1,5 +1,5 @@
 import type { CmAirRate, CmLocalRate, CmMaster, CmWeightBreak } from './cmExcelMaster'
-import { DEFAULT_GCR_BREAKS } from './cmExcelMaster'
+import { DEFAULT_GCR_BREAKS, formatBreakLabel, syncBreakLabels } from './cmExcelMaster'
 
 export function cloneMaster(master: CmMaster): CmMaster {
   return {
@@ -14,6 +14,10 @@ function alignRates(air: CmAirRate, breakCount: number): number[] {
   const next = air.rates.slice(0, breakCount)
   while (next.length < breakCount) next.push(0)
   return next
+}
+
+function hasBreakKg(breaks: CmWeightBreak[], minKg: number, exceptId?: string): boolean {
+  return breaks.some((b) => b.minKg === minKg && b.id !== exceptId)
 }
 
 export function patchAirRoute(
@@ -106,25 +110,33 @@ export function patchWeightBreak(
   if (index < 0 || index >= master.breaks.length) return master
   const oldIds = master.breaks.map((b) => b.id)
   const next = cloneMaster(master)
-  next.breaks[index] = { ...next.breaks[index], ...patch }
+  const current = next.breaks[index]
+  let minKg = current.minKg
   if (typeof patch.minKg === 'number' && Number.isFinite(patch.minKg)) {
-    next.breaks[index].minKg = Math.max(0, patch.minKg)
+    minKg = Math.max(0, patch.minKg)
   }
-  if (patch.label) {
-    next.breaks[index].label = patch.label.trim() || next.breaks[index].label
+  if (hasBreakKg(next.breaks, minKg, current.id)) {
+    return master
   }
+  next.breaks[index] = { ...current, ...patch, minKg }
   next.breaks.sort((a, b) => a.minKg - b.minKg)
+  next.breaks = syncBreakLabels(next.breaks)
   return reorderAirRates(next, oldIds)
 }
 
-export function addWeightBreak(master: CmMaster, minKg = 300): CmMaster {
+export function addWeightBreak(master: CmMaster, minKg = 300): CmMaster | null {
   const kg = Math.max(0, minKg)
-  const label = kg === 0 ? 'FLAT' : `+${kg}`
+  if (hasBreakKg(master.breaks, kg)) return null
   const id = `wb-${kg}-${Date.now().toString(16)}`
   const oldIds = master.breaks.map((b) => b.id)
   const next = cloneMaster(master)
-  next.breaks.push({ id, minKg: kg, label })
+  next.breaks.push({
+    id,
+    minKg: kg,
+    label: formatBreakLabel(kg, next.breaks.length + 1),
+  })
   next.breaks.sort((a, b) => a.minKg - b.minKg)
+  next.breaks = syncBreakLabels(next.breaks)
   return reorderAirRates(next, oldIds)
 }
 
@@ -134,20 +146,6 @@ export function removeWeightBreak(master: CmMaster, index: number): CmMaster {
   const oldIds = master.breaks.map((b) => b.id)
   const next = cloneMaster(master)
   next.breaks.splice(index, 1)
+  next.breaks = syncBreakLabels(next.breaks)
   return reorderAirRates(next, oldIds)
-}
-
-/** Restore GCR columns; keep rates that share the same minKg. */
-export function resetGcrBreaks(master: CmMaster): CmMaster {
-  const old = master.breaks
-  const next = cloneMaster(master)
-  next.breaks = DEFAULT_GCR_BREAKS.map((b) => ({ ...b }))
-  next.air = next.air.map((row) => ({
-    ...row,
-    rates: next.breaks.map((nb) => {
-      const i = old.findIndex((ob) => ob.minKg === nb.minKg)
-      return i >= 0 ? (row.rates[i] ?? 0) : 0
-    }),
-  }))
-  return next
 }
