@@ -1,94 +1,138 @@
 # WAC Origin Cost Desk
 
-Internal air **가견적** desk. It mirrors the Excel workbook `Master_DB` → `입력` → `견적서`.
+Internal air **가견적** tool for WAC forwarding. It mirrors the Excel workbook flow:
 
-This is not the public marketing site. The only UI is `/origin-cost-desk`.
+`Master_DB` → `입력` → `견적서` (PDF)
 
-## Run
+Only route in the app: `/origin-cost-desk`.
+
+Repo: [hyunseook0606-dev/WAC_Quoto-Simulator](https://github.com/hyunseook0606-dev/WAC_Quoto-Simulator)
+
+## What this is
+
+- React + Vite desk UI that loads rates from `public/excel/WAC_Air_Quotation_Simulator.xlsx` (first visit), then keeps Master edits in **browser localStorage**.
+- Quote math lives in TypeScript (`cmDeskQuote.ts`) and must stay aligned with Excel.
+- Production process (`npm start`) serves the built UI **and** a small JSON history API so the team shares Save PDF / Pin history on one server file.
+
+## Requirements
+
+- Node **22+** (nvm on the devops host is fine)
+- npm
+
+## Local development
 
 ```bash
 npm ci
+npm run dev          # http://localhost:5174/origin-cost-desk
+```
+
+### Shared history while developing
+
+History API runs separately; Vite proxies `/api` → `127.0.0.1:8080`.
+
+```bash
+# terminal 1
+npm run dev:api
+
+# terminal 2
 npm run dev
 ```
 
-Open http://localhost:5174/origin-cost-desk (Vite uses port **5174**).
+If `dev:api` is down, the UI uses browser-only history and shows that in the history panel.
+
+### Checks
 
 ```bash
-npm run build    # production static files in dist/
-npx tsc -b       # typecheck
+npx tsc -b
+npm run verify:cases   # ICN-HKG / HKG-ICN regression cases A–F
+npm run build
 ```
 
-Node 22+ recommended.
-
-## Daily workflow
-
-1. **Master_DB** — yellow cells are live rates (edit routes, breaks, locals by hand). **First visit** loads bundled Excel; **after that** this browser keeps your edits automatically (local and cloud).
-2. **Input** — cargo, route, 비용 내역. Local charge **names** come from Master. Edit **unit** and **참고** by hand. **예외(J)** overrides 참고.
-3. Repeat cases: **Pin this case** once (e.g. Chocolate KEEP COOL). Next time click it at the top of Input, change only cargo / 예외 / remark, then Save PDF.
-4. **Save PDF** also writes history in this browser (`localStorage`). Same case is upserted, not duplicated.
-5. **Reuse** = new draft. **Open** = reprint the saved quote.
-
-### Calculation rules (must match Excel)
-
-- CBM = L × W × H × Qty / 1,000,000
-- Volume kg = CBM × 167
-- C.W. = max(gross, volume kg)
-- Break: highest Master weight-break whose min kg ≤ C.W. Default GCR is -45 / +45 / +100 / +500 / +1000; add +300, +2000, or FLAT in Master if the contract needs it
-- Air freight = max(rate × C.W., MIN); FSC/SSC = per kg × C.W.
-- Local: CBM / KG|C.W. / BL|ENTRY / PLT / else max(rate, min)
-- Currency from Master `CUR`. If **HKD**, TOTAL × Ex.Rate. If **USD**, Ex.Rate is ignored.
-- PDF hides zero-amount lines and empty extra Other rows.
-
-Excel file the UI loads:
-
-`public/excel/WAC_Air_Quotation_Simulator.xlsx`
-
-## Layout
-
-```
-src/origin-cost-desk/
-  OriginCostDeskSite.tsx   UI: Master / Input / Quotation / history
-  cmExcelMaster.ts         parse Master_DB from xlsx
-  cmDeskQuote.ts           quote math
-  cmDeskDocument.ts        quotation HTML
-  cmDeskPdf.ts             which lines print
-  cmMasterEdit.ts          patch air/local rows
-  cmDeskConfig.ts          extra Other row type
-  components/CmMasterEditor.tsx
-src/quoteDocument.ts       browser print (no localhost footer)
-excel-quote/               optional Python engine (sanity / future API)
-.cursor/                   Cursor Cloud Agent environment (optional)
-```
-
-History and the current draft live in **browser localStorage only**. They are not on the server and not shared across PCs.
-
-## Verification (ICN-HKG)
-
-After changing Master or quote logic, run:
-
-```bash
-npm run verify:cases
-```
-
-| Case | Input | Expect |
-|------|-------|--------|
-| **A** Volume | 110×110×150 cm × 3 PLT, GW 400 kg | C.W. ≈ 909 kg (+500 @ $3.20) |
-| **B** Heavy | 30×30×30 cm × 1, GW 80 kg | C.W. = 80 kg (+45 @ $4.50) |
-| **C** MIN | 20×20×20 cm × 1, GW 3 kg | Air ≥ $50 MIN, Trucking ≥ $80 MIN |
-
-Route: **ICN-HKG** (USD). Script: `scripts/verify-icn-hkg-cases.mts`.
-
-## Deploy (static)
+## Production (UI + shared history)
 
 ```bash
 npm ci
 npm run build
+npm start              # node server/deskServer.mjs  (PORT default 8080)
 ```
 
-Serve the `dist/` folder with any static host (nginx, etc.). Client-side routing: all paths should fallback to `index.html`.
+| Path | Purpose |
+|------|---------|
+| `/origin-cost-desk` | Desk UI (SPA; unknown paths → `index.html`) |
+| `GET /api/health` | Liveness |
+| `GET /api/history` | `{ updatedAt, items }` |
+| `POST /api/history` | Upsert one history item by `id` |
+| `DELETE /api/history/:id` | Remove one item |
 
-Do **not** commit SSH passwords or intern accounts. Keep server credentials in the host vault, not this repo.
+Store file (created at runtime, **not** in git):
 
-## What not to add back
+`data/shared-history.json`
 
-Marketing pages, pitch PNGs, and unused public photos were removed on purpose. The desk only needs WAC logos + the Excel workbook under `public/`.
+### What is shared vs local
+
+| Data | Where |
+|------|--------|
+| Quote history (Save PDF, Pin, delete) | Server file when API is up; else localStorage fallback |
+| Master rates / draft input | Per browser (`localStorage`) |
+| Bundled Excel | First-load default only |
+
+v1 history is last-write-wins, no auth (internal network / tunnel only).
+
+## Deploy on company devops host
+
+Helper: `scripts/deploy-cloud.sh` (run **on the host** after SSH).
+
+It will:
+
+1. `git fetch` + `reset --hard origin/main`
+2. `npm ci` → `build` → `verify:cases`
+3. Stop old `serve` / previous `deskServer`
+4. Start `node server/deskServer.mjs` under a simple restart loop
+
+```bash
+bash scripts/deploy-cloud.sh
+# or: PORT=8080 bash scripts/deploy-cloud.sh
+```
+
+If the public port is firewalled, open an SSH local tunnel from your PC, then use `http://localhost:8080/origin-cost-desk`.
+
+Do **not** commit SSH passwords, keys, or host accounts into this repo.
+
+## Layout
+
+```
+src/origin-cost-desk/     UI, quote engine, PDF HTML, history client
+server/deskServer.mjs     Static dist/ + /api/history
+public/excel/…xlsx        Master rates source for the web app
+scripts/verify-icn-hkg-cases.mts
+scripts/deploy-cloud.sh
+excel-quote/              Optional Python engine (not used by the web UI)
+data/                     Runtime shared history (gitignored)
+```
+
+## Calculation rules (must match Excel)
+
+- CBM = L × W × H × Qty / 1,000,000
+- Volume kg = CBM × 167
+- Per-piece C.W. = max(GW, CBM×167); multi-piece C.W. = sum of per-piece (Excel M14)
+- Break: highest Master weight-break whose min kg ≤ C.W.
+- Air freight = max(rate × C.W., MIN); FSC/SSC = per kg × C.W.
+- ALL-IN /kg (display) = Air rate + FSC/kg + SSC/kg (not part of TOTAL)
+- Local: CBM / KG|C.W. / BL|ENTRY / PLT / else max(rate, min); Terminal basis can follow Master Note (C.W. vs G.W.)
+- Currency from Master `CUR`. **HKD** → TOTAL × Ex.Rate. **USD** → Ex.Rate ignored.
+
+## npm scripts
+
+| Script | Role |
+|--------|------|
+| `dev` | Vite on 5174 |
+| `dev:api` | History API (+ serves `dist/` if built) |
+| `build` | `tsc -b` + Vite production build |
+| `start` | Production desk server |
+| `verify:cases` | Quote regression |
+
+## Notes for maintainers
+
+- Changing quote math or Master parsing: run `npm run verify:cases` before merge.
+- Shared history JSON can grow (PDF HTML is stored per item); server body limit is 8MB per request.
+- Marketing / pitch assets were removed on purpose; keep only WAC logos + the Excel under `public/`.

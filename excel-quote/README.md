@@ -1,16 +1,20 @@
 # excel-quote (optional)
 
-Python copy of the Excel quote engine. The **web desk does not call this**. It is for:
+Standalone Python copy of the Excel quote engine. The **web desk does not call this**.
 
-- sanity-checking totals against the xlsx
-- a future API, if history ever leaves localStorage
+Use it to sanity-check totals against the workbook, or as a reference if you add a separate calc API later.
 
 ```bash
 cd excel-quote
 python -m venv .venv
-.venv/Scripts/activate   # Windows
+# Windows: .venv\Scripts\activate
+# macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 python validate_cases.py
 ```
 
-Workbook used by the UI is `../public/excel/WAC_Air_Quotation_Simulator.xlsx`.
+Canonical workbook for the React app:
+
+`../public/excel/WAC_Air_Quotation_Simulator.xlsx`
+
+Team quote **history** for the desk is handled by `server/deskServer.mjs` (`data/shared-history.json`), not by this folder.

@@ -1,10 +1,12 @@
 {
-  "name": "wac-logistics",
+  "name": "wac-origin-cost-desk",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port 5174 --strictPort --host localhost",
+    "dev:api": "node server/deskServer.mjs",
+    "start": "node server/deskServer.mjs",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",

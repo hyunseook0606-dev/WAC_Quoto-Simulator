@@ -25,6 +25,12 @@ import { printQuotation } from '../quoteDocument'
 import { type CmExtraOther } from './cmDeskConfig'
 import { handleArrowNav, selectAllFocusProps } from './deskInputUx'
 import { addAirRoute } from './cmMasterEdit'
+import {
+  deleteSharedHistoryItem,
+  fetchSharedHistory,
+  upsertSharedHistoryItem,
+  type HistorySource,
+} from './historyApi'
 
 type TabKey = 'master' | 'input' | 'quote'
 type CargoPieceDraft = {
@@ -212,6 +218,8 @@ export function OriginCostDeskSite() {
   const DRAFT_KEY = 'origin-cost-desk.draft.v1'
   const MASTER_KEY = 'origin-cost-desk.master.v2'
   const [quoteHistory, setQuoteHistory] = useState<QuoteHistoryItem[]>([])
+  const [historySource, setHistorySource] = useState<HistorySource>('local')
+  const [historySyncMsg, setHistorySyncMsg] = useState('')
   const [historyQuery, setHistoryQuery] = useState('')
   const [historyShowAdvanced, setHistoryShowAdvanced] = useState(false)
   const [historySameRoute, setHistorySameRoute] = useState(false)
@@ -276,16 +284,51 @@ export function OriginCostDeskSite() {
   }, [])
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(HISTORY_KEY)
-      if (!raw) return
-      const parsed = JSON.parse(raw) as QuoteHistoryItem[]
-      if (Array.isArray(parsed)) setQuoteHistory(parsed)
-    } catch {
-      // ignore
-    } finally {
+    let cancelled = false
+    void (async () => {
+      const remote = await fetchSharedHistory()
+      if (cancelled) return
+      if (remote.ok) {
+        setQuoteHistory(remote.items as QuoteHistoryItem[])
+        setHistorySource('server')
+        setHistorySyncMsg('Shared on team server')
+        try {
+          localStorage.setItem(HISTORY_KEY, JSON.stringify(remote.items))
+        } catch {
+          // ignore
+        }
+      } else {
+        try {
+          const raw = localStorage.getItem(HISTORY_KEY)
+          if (raw) {
+            const parsed = JSON.parse(raw) as QuoteHistoryItem[]
+            if (Array.isArray(parsed)) setQuoteHistory(parsed)
+          }
+        } catch {
+          // ignore
+        }
+        setHistorySource('local')
+        setHistorySyncMsg('This browser only (API offline)')
+      }
       historyHydratedRef.current = true
+    })()
+    return () => {
+      cancelled = true
     }
+  }, [])
+
+  useEffect(() => {
+    const onFocus = () => {
+      void (async () => {
+        const remote = await fetchSharedHistory()
+        if (!remote.ok) return
+        setQuoteHistory(remote.items as QuoteHistoryItem[])
+        setHistorySource('server')
+        setHistorySyncMsg('Shared on team server')
+      })()
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
   }, [])
 
   useEffect(() => {
@@ -849,6 +892,7 @@ export function OriginCostDeskSite() {
       carrierCode: item.carrierCode,
     })
 
+    let savedItem = item
     setQuoteHistory((prev) => {
       if (opts?.pin) {
         const existing = prev.findIndex(
@@ -858,11 +902,10 @@ export function OriginCostDeskSite() {
           const next = [...prev]
           const keepId = next[existing].id
           next.splice(existing, 1)
-          return [{ ...item, id: keepId, pinned: true, caseName: name }, ...next].slice(
-            0,
-            200,
-          )
+          savedItem = { ...item, id: keepId, pinned: true, caseName: name }
+          return [savedItem, ...next].slice(0, 200)
         }
+        savedItem = item
         return [item, ...prev].slice(0, 200)
       }
 
@@ -874,20 +917,29 @@ export function OriginCostDeskSite() {
           const next = [...prev]
           const keep = next[existing]
           next.splice(existing, 1)
-          return [
-            {
-              ...item,
-              id: keep.id,
-              pinned: false,
-              caseName: keep.caseName,
-            },
-            ...next,
-          ].slice(0, 200)
+          savedItem = {
+            ...item,
+            id: keep.id,
+            pinned: false,
+            caseName: keep.caseName,
+          }
+          return [savedItem, ...next].slice(0, 200)
         }
       }
 
+      savedItem = item
       return [item, ...prev].slice(0, 200)
     })
+
+    void (async () => {
+      const ok = await upsertSharedHistoryItem(savedItem)
+      if (ok) {
+        setHistorySource('server')
+        setHistorySyncMsg('Shared on team server')
+      } else if (historySource === 'server') {
+        setHistorySyncMsg('Server save failed — kept in this browser')
+      }
+    })()
 
     if (opts?.pin) {
       setCaseNameDraft('')
@@ -907,8 +959,8 @@ export function OriginCostDeskSite() {
   }
 
   const togglePinHistory = (id: string) => {
-    setQuoteHistory((prev) =>
-      prev.map((row) => {
+    setQuoteHistory((prev) => {
+      const next = prev.map((row) => {
         if (row.id !== id) return row
         const pinned = !row.pinned
         return {
@@ -918,8 +970,13 @@ export function OriginCostDeskSite() {
             ? row.caseName?.trim() || defaultCaseName(row)
             : row.caseName,
         }
-      }),
-    )
+      })
+      const changed = next.find((row) => row.id === id)
+      if (changed) {
+        void upsertSharedHistoryItem(changed)
+      }
+      return next
+    })
   }
 
   const filteredQuoteHistory = useMemo(() => {
@@ -1064,6 +1121,7 @@ export function OriginCostDeskSite() {
       (row ? `${row.origin}-${row.destination}` : 'this case')
     if (!window.confirm(`Delete history entry “${label}”?`)) return
     setQuoteHistory((prev) => prev.filter((item) => item.id !== id))
+    void deleteSharedHistoryItem(id)
   }
 
   const openLoadedHistoryPdf = () => {
@@ -1097,7 +1155,8 @@ export function OriginCostDeskSite() {
         <div>
           <p className="text-sm font-bold text-slate-800">Repeat cases & history</p>
           <p className="mt-0.5 text-[11px] font-semibold text-slate-500">
-          Pin a case once. Next jobs: click it, change only what differs, then Save case or Save PDF.
+            Pin a case once. Next jobs: click it, change only what differs, then Save case or Save PDF.
+            {historySyncMsg ? ` · ${historySyncMsg}` : ''}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

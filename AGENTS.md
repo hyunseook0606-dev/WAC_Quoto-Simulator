@@ -11,12 +11,20 @@ npm run dev
 
 Port **5174**. Open `/origin-cost-desk`.
 
+Shared history (optional while developing):
+
+```bash
+npm run dev:api   # :8080
+npm run dev       # proxies /api
+```
+
 ## Layout
 
-- `src/origin-cost-desk/` — UI, quote engine, PDF HTML
+- `src/origin-cost-desk/` — UI, quote engine, PDF HTML, `historyApi.ts`
+- `server/deskServer.mjs` — production static + `/api/history` → `data/shared-history.json`
 - `public/excel/WAC_Air_Quotation_Simulator.xlsx` — Master rates source
 - HKD lanes: TOTAL × Ex.Rate. USD lanes leave TOTAL as-is.
-- Pin repeat cases in Input; Save PDF auto-saves history in localStorage.
+- Pin repeat cases in Input; Save PDF auto-saves history (server when API up).
 - Master routes and weight breaks are editable; saved per browser (`origin-cost-desk.master.v2`). Bundled workbook is first-load default only.
 
 ## Cursor Cloud specific instructions
