@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, Fragment, type ClipboardEvent as ReactClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import * as XLSX from 'xlsx'
 import { FileSpreadsheet, Loader2, Pin, Plus, Search, Trash2 } from 'lucide-react'
 import { CmMasterEditor } from './components/CmMasterEditor'
@@ -101,12 +101,6 @@ function cargoDimsText(pieces: CargoPieceDraft[]): string {
         }`,
     )
     .join(' · ')
-}
-
-function chunkPairs<T>(items: T[]): T[][] {
-  const out: T[][] = []
-  for (let i = 0; i < items.length; i += 2) out.push(items.slice(i, i + 2))
-  return out
 }
 
 function historySearchBlob(item: QuoteHistoryItem): string {
@@ -1955,7 +1949,7 @@ export function OriginCostDeskSite() {
                     <tr className="border-t border-slate-200">
                       <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">CBM</th>
                       <td className="bg-emerald-50 px-3 py-2 font-black text-emerald-700">{cargoCbm.toFixed(3)}</td>
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">실중량</th>
+                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">실중량합</th>
                       <td className="bg-emerald-50 px-3 py-2 font-black text-emerald-700">{cargoGross.toFixed(2)}</td>
                     </tr>
                     <tr className="border-t border-slate-200">
@@ -1965,7 +1959,7 @@ export function OriginCostDeskSite() {
                       <td className="bg-emerald-100 px-3 py-2 font-black text-emerald-800">{effectiveCw.toFixed(2)}</td>
                     </tr>
                     <tr className="border-t border-slate-200">
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">+ Break</th>
+                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">Break</th>
                       <td className="bg-white px-3 py-2 text-center font-bold text-slate-600">
                         {deskQuote ? deskQuote.breakLabel : ''}
                       </td>
@@ -1976,87 +1970,24 @@ export function OriginCostDeskSite() {
                     </tr>
                     <tr className="border-t border-slate-200">
                       <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">Air MIN</th>
-                      <td className="bg-[#FFFBEA] px-2 py-2">
-                        <span className="block text-center font-bold text-slate-600">
-                          {routeRow
-                            ? routeRow.min.toFixed(2)
-                            : deskQuote
-                              ? deskQuote.airMin.toFixed(2)
-                              : ''}
-                        </span>
+                      <td className="bg-white px-3 py-2 text-center font-bold text-slate-600">
+                        {routeRow
+                          ? routeRow.min.toFixed(2)
+                          : deskQuote
+                            ? deskQuote.airMin.toFixed(2)
+                            : ''}
                       </td>
-                      {master?.breaks[0] ? (
-                        <>
-                          <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">
-                            {master.breaks[0].label}
-                          </th>
-                          <td
-                            className={`px-2 py-2 ${
-                              deskQuote?.breakLabel === master.breaks[0].label
-                                ? 'bg-emerald-50'
-                                : 'bg-[#FFFBEA]'
-                            }`}
-                          >
-                            <span className="block text-center font-bold text-slate-800">
-                              {routeRow ? (routeRow.rates[0] ?? 0).toFixed(2) : ''}
-                            </span>
-                          </td>
-                        </>
-                      ) : (
-                        <>
-                          <th className="bg-[#F4F7FB] px-3 py-3" />
-                          <td className="bg-white px-2 py-2" />
-                        </>
-                      )}
+                      <th className="bg-[#F4F7FB] px-3 py-3" />
+                      <td className="bg-white px-3 py-2" />
                     </tr>
-                    {chunkPairs(master?.breaks.slice(1) ?? []).map((pair, rowIdx) => {
-                      const base = 1 + rowIdx * 2
-                      return (
-                        <tr
-                          key={pair.map((b) => b.id).join('-')}
-                          className="border-t border-slate-200"
-                        >
-                          {pair.map((b, j) => {
-                            const bi = base + j
-                            const active = deskQuote?.breakLabel === b.label
-                            return (
-                              <Fragment key={b.id}>
-                                <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">
-                                  {b.label}
-                                </th>
-                                <td
-                                  className={`px-2 py-2 ${
-                                    active ? 'bg-emerald-50' : 'bg-[#FFFBEA]'
-                                  }`}
-                                >
-                                  <span className="block text-center font-bold text-slate-800">
-                                    {routeRow ? (routeRow.rates[bi] ?? 0).toFixed(2) : ''}
-                                  </span>
-                                </td>
-                              </Fragment>
-                            )
-                          })}
-                          {pair.length === 1 ? (
-                            <>
-                              <th className="bg-[#F4F7FB] px-3 py-3" />
-                              <td className="bg-white px-2 py-2" />
-                            </>
-                          ) : null}
-                        </tr>
-                      )
-                    })}
                     <tr className="border-t border-slate-200">
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">FSC/kg</th>
-                      <td className="bg-[#FFFBEA] px-2 py-2">
-                        <span className="block text-center font-bold text-slate-600">
-                          {routeRow ? routeRow.fsc.toFixed(2) : deskQuote ? deskQuote.fscPerKg.toFixed(2) : ''}
-                        </span>
+                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">FSC /kg</th>
+                      <td className="bg-white px-3 py-2 text-center font-bold text-slate-600">
+                        {routeRow ? routeRow.fsc.toFixed(2) : deskQuote ? deskQuote.fscPerKg.toFixed(2) : ''}
                       </td>
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">SSC/kg</th>
-                      <td className="bg-[#FFFBEA] px-2 py-2">
-                        <span className="block text-center font-bold text-slate-600">
-                          {routeRow ? routeRow.ssc.toFixed(2) : deskQuote ? deskQuote.sscPerKg.toFixed(2) : ''}
-                        </span>
+                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">SSC /kg</th>
+                      <td className="bg-white px-3 py-2 text-center font-bold text-slate-600">
+                        {routeRow ? routeRow.ssc.toFixed(2) : deskQuote ? deskQuote.sscPerKg.toFixed(2) : ''}
                       </td>
                     </tr>
                   </tbody>
