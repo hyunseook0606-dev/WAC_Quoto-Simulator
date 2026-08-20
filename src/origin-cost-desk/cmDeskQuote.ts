@@ -180,7 +180,14 @@ export function calcCmDeskQuote(
       )
     : (input.length * input.width * input.height * input.qty) / master.cbmDivisor
   const volumetric = cbm * master.volFactor
-  const cw = Math.max(gross, volumetric)
+  // Excel 입력!M14 = SUM(C14:L14) where each col = MAX(Gross, CBM×volFactor)
+  const cw = pieces.length
+    ? pieces.reduce((sum, piece) => {
+        const pieceCbm =
+          (piece.length * piece.width * piece.height * piece.qty) / master.cbmDivisor
+        return sum + Math.max(piece.gross, pieceCbm * master.volFactor)
+      }, 0)
+    : Math.max(gross, volumetric)
   const picked = pickWeightBreak(cw, master.breaks)
   const breakLabel = picked?.label ?? ''
   const airRate = picked ? rateForBreak(air, master.breaks, picked.id) : 0

@@ -84,13 +84,6 @@ function esc(s: string) {
     .replace(/"/g, '&quot;')
 }
 
-function normalizeIntDraft(raw: string): string {
-  const cleaned = raw.replace(/\D/g, '')
-  if (cleaned === '') return ''
-  // 030 -> 30, 000 -> 0
-  return cleaned.replace(/^0+(?=\d)/, '')
-}
-
 function cargoDimsText(pieces: CargoPieceDraft[]): string {
   return pieces
     .filter((p) => p.length && p.width && p.height)
@@ -154,20 +147,6 @@ function defaultCaseName(item: {
     `${item.origin}-${item.destination}`,
   ].filter(Boolean)
   return bits.join(' · ')
-}
-
-function normalizeNumberDraft(raw: string): string {
-  const cleaned = raw.replace(/[^\d.]/g, '')
-  if (cleaned === '') return ''
-  const firstDot = cleaned.indexOf('.')
-  if (firstDot >= 0) {
-    const intPartRaw = cleaned.slice(0, firstDot)
-    const fracPartRaw = cleaned.slice(firstDot + 1).replace(/\./g, '')
-    const intPart = normalizeIntDraft(intPartRaw)
-    const safeInt = intPart === '' ? '0' : intPart
-    return `${safeInt}.${fracPartRaw}`
-  }
-  return normalizeIntDraft(cleaned)
 }
 
 export function OriginCostDeskSite() {
@@ -620,11 +599,11 @@ export function OriginCostDeskSite() {
 
           next[slot] = {
             ...next[slot],
-            length: normalizeIntDraft(String(L)),
-            width: normalizeIntDraft(String(W)),
-            height: normalizeIntDraft(String(H)),
-            qty: normalizeIntDraft(String(Q)),
-            gross: normalizeNumberDraft(String(GW)),
+            length: String(L),
+            width: String(W),
+            height: String(H),
+            qty: String(Q),
+            gross: String(GW),
           }
 
           slot++
@@ -1069,8 +1048,11 @@ export function OriginCostDeskSite() {
     printQuotation(loadedHistoryPdfHtml)
   }
 
+  // Excel M14: sum of per-slot MAX(Gross, CBM×167) — not max(ΣGW, ΣCBM×167)
   const chargeableWeight = cargoCbm * 167
-  const effectiveCw = Math.max(cargoGross, chargeableWeight)
+  const effectiveCw = usingDetailedCargo
+    ? pieceMetrics.reduce((sum, piece) => sum + (piece.cwValue > 0 ? piece.cwValue : 0), 0)
+    : Math.max(cargoGross, chargeableWeight)
   const routeKey = `${origin}-${destination}`
   const routeIndex = master?.air.findIndex((a) => a.route === routeKey) ?? -1
   const routeRow = master && routeIndex >= 0 ? master.air[routeIndex] : null
@@ -1633,10 +1615,9 @@ export function OriginCostDeskSite() {
                             })
                           }
                           type="text"
-                          inputMode="numeric"
                           className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 shadow-sm outline-none focus:border-wac-orange"
                           value={blCountDraft}
-                          onChange={(e) => setBlCountDraft(normalizeIntDraft(e.target.value))}
+                          onChange={(e) => setBlCountDraft(e.target.value)}
                         />
                       </td>
                     </tr>
@@ -1773,14 +1754,13 @@ export function OriginCostDeskSite() {
                                           })
                                         }
                                         type="text"
-                                        inputMode="numeric"
                                         onPaste={handleCargoPaste(pieceIndex)}
                                         className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center shadow-sm outline-none focus:border-wac-orange"
                                         value={piece.length}
                                         onChange={(e) =>
                                           setCargoPieces((rows) =>
                                             rows.map((row) =>
-                                              row.id === piece.id ? { ...row, length: normalizeIntDraft(e.target.value) } : row,
+                                              row.id === piece.id ? { ...row, length: e.target.value } : row,
                                             ),
                                           )
                                         }
@@ -1805,14 +1785,13 @@ export function OriginCostDeskSite() {
                                           })
                                         }
                                         type="text"
-                                        inputMode="numeric"
                                         onPaste={handleCargoPaste(pieceIndex)}
                                         className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center shadow-sm outline-none focus:border-wac-orange"
                                         value={piece.width}
                                         onChange={(e) =>
                                           setCargoPieces((rows) =>
                                             rows.map((row) =>
-                                              row.id === piece.id ? { ...row, width: normalizeIntDraft(e.target.value) } : row,
+                                              row.id === piece.id ? { ...row, width: e.target.value } : row,
                                             ),
                                           )
                                         }
@@ -1837,14 +1816,13 @@ export function OriginCostDeskSite() {
                                           })
                                         }
                                         type="text"
-                                        inputMode="numeric"
                                         onPaste={handleCargoPaste(pieceIndex)}
                                         className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center shadow-sm outline-none focus:border-wac-orange"
                                         value={piece.height}
                                         onChange={(e) =>
                                           setCargoPieces((rows) =>
                                             rows.map((row) =>
-                                              row.id === piece.id ? { ...row, height: normalizeIntDraft(e.target.value) } : row,
+                                              row.id === piece.id ? { ...row, height: e.target.value } : row,
                                             ),
                                           )
                                         }
@@ -1869,14 +1847,13 @@ export function OriginCostDeskSite() {
                                           })
                                         }
                                         type="text"
-                                        inputMode="numeric"
                                         onPaste={handleCargoPaste(pieceIndex)}
                                         className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center shadow-sm outline-none focus:border-wac-orange"
                                         value={piece.qty}
                                         onChange={(e) =>
                                           setCargoPieces((rows) =>
                                             rows.map((row) =>
-                                              row.id === piece.id ? { ...row, qty: normalizeIntDraft(e.target.value) } : row,
+                                              row.id === piece.id ? { ...row, qty: e.target.value } : row,
                                             ),
                                           )
                                         }
@@ -1901,14 +1878,13 @@ export function OriginCostDeskSite() {
                                           })
                                         }
                                         type="text"
-                                        inputMode="decimal"
                                         onPaste={handleCargoPaste(index)}
                                         className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center shadow-sm outline-none focus:border-wac-orange"
                                         value={piece.gross}
                                         onChange={(e) =>
                                           setCargoPieces((rows) =>
                                             rows.map((row) =>
-                                              row.id === piece.id ? { ...row, gross: normalizeNumberDraft(e.target.value) } : row,
+                                              row.id === piece.id ? { ...row, gross: e.target.value } : row,
                                             ),
                                           )
                                         }
@@ -2156,12 +2132,11 @@ export function OriginCostDeskSite() {
                                     cellRefs.current[`${l.id}-ref`] = el
                                   }}
                                   type="text"
-                                  inputMode="decimal"
                                   value={refDraft[l.id] ?? l.ref.toFixed(2)}
                                   onChange={(e) =>
                                     setRefDraft((d) => ({
                                       ...d,
-                                      [l.id]: normalizeNumberDraft(e.target.value),
+                                      [l.id]: e.target.value,
                                     }))
                                   }
                                   onKeyDown={(e) =>
@@ -2184,7 +2159,6 @@ export function OriginCostDeskSite() {
                                   cellRefs.current[thisExcCellId] = el
                                 }}
                                 type="text"
-                                inputMode="decimal"
                                 placeholder=""
                                 value={exceptionDraft[l.id] ?? ''}
                                 onKeyDown={(e) =>
@@ -2198,9 +2172,7 @@ export function OriginCostDeskSite() {
                                 onChange={(e) =>
                                   setExceptionDraft((d) => ({
                                     ...d,
-                                    [l.id]: normalizeNumberDraft(
-                                      e.target.value,
-                                    ),
+                                    [l.id]: e.target.value,
                                   }))
                                 }
                                 className="h-9 w-full rounded border border-yellow-200 bg-yellow-50 px-2 text-right text-[12px] font-medium outline-none focus:border-wac-orange"
@@ -2259,10 +2231,9 @@ export function OriginCostDeskSite() {
                           })
                         }
                         type="text"
-                        inputMode="decimal"
                         className="h-9 w-full rounded-md border border-amber-200 bg-white px-2 text-sm font-bold text-slate-800 shadow-sm outline-none focus:border-wac-orange"
                         value={fxDraft}
-                        onChange={(e) => setFxDraft(normalizeNumberDraft(e.target.value))}
+                        onChange={(e) => setFxDraft(e.target.value)}
                       />
                       <p className="mt-1 text-[10px] text-slate-500">
                         Excel과 동일: Currency가 HKD이면 TOTAL × Ex.Rate (USD는 그대로)

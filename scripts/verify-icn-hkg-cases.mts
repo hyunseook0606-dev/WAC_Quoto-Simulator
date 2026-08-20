@@ -80,6 +80,33 @@ const cases: Case[] = [
       truckingMin: 80,
     },
   },
+  {
+    // Excel M14 = Σ MAX(GW, CBM×167) per slot — not max(ΣGW, ΣCBM×167)
+    // Slot1: 30³ / 1e6 ×167 ≈ 4.5 → CW 200
+    // Slot2: 100³ / 1e6 ×167 = 167 → CW 167
+    // Total CW = 367 (old bug would yield 210)
+    name: 'CASE D — Mixed multi-piece C.W. (Excel M14)',
+    input: {
+      origin: 'ICN',
+      destination: 'HKG',
+      length: 30,
+      width: 30,
+      height: 30,
+      qty: 1,
+      gross: 200,
+      fx: 1,
+      blCount: 1,
+      pieces: [
+        { length: 30, width: 30, height: 30, qty: 1, gross: 200 },
+        { length: 100, width: 100, height: 100, qty: 1, gross: 10 },
+      ],
+    },
+    expect: {
+      cw: 367,
+      breakLabel: '+100',
+      airRate: 3.8,
+    },
+  },
 ]
 
 let failed = 0

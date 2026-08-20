@@ -34,7 +34,6 @@ export function NumericCell({
     <input
       ref={inputRef}
       type="text"
-      inputMode="decimal"
       value={shown}
       onFocus={() => {
         setFocused(true)
@@ -42,10 +41,10 @@ export function NumericCell({
       }}
       onBlur={() => {
         setFocused(false)
-        const n = Number(draft)
-        onCommit(Number.isFinite(n) ? n : 0)
+        const n = Number(draft.trim())
+        if (Number.isFinite(n)) onCommit(n)
       }}
-      onChange={(e) => setDraft(e.target.value.replace(/[^\d.-]/g, ''))}
+      onChange={(e) => setDraft(e.target.value)}
       onKeyDown={onKeyDown}
       className={className}
     />
@@ -160,9 +159,8 @@ export function CmMasterEditor({ master, onChange }: Props) {
             From (kg)
             <input
               type="text"
-              inputMode="numeric"
               value={newBreakKg}
-              onChange={(e) => setNewBreakKg(e.target.value.replace(/[^\d.]/g, ''))}
+              onChange={(e) => setNewBreakKg(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault()
