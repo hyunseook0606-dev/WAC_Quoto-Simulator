@@ -30,6 +30,8 @@ dist-ssr
 # Excel lock files
 ~$*.xlsx
 excel-quote/~$*.xlsx
+excel-quote/__pycache__/
+**/__pycache__/
 
 # Presentation / report captures (not part of the desk app)
 docs/

@@ -3,6 +3,11 @@ import * as XLSX from 'xlsx'
 import { FileSpreadsheet, Loader2, Pin, Plus, Search, Trash2 } from 'lucide-react'
 import { CmMasterEditor } from './components/CmMasterEditor'
 import {
+  DraftTextInput,
+  formatRoute,
+  parseRouteDraft,
+} from './components/DraftTextInput'
+import {
   calcCmDeskQuote,
   parseCmExceptions,
   type CmCargoPiece,
@@ -218,7 +223,6 @@ export function OriginCostDeskSite() {
   } | null>(null)
   const [caseNameDraft, setCaseNameDraft] = useState('')
 
-  const [isLoading, setIsLoading] = useState(false)
   const cellRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const historyHydratedRef = useRef(false)
   const draftHydratedRef = useRef(false)
@@ -237,7 +241,7 @@ export function OriginCostDeskSite() {
             const saved = normalizeMaster(parsed)
             setMaster(saved)
             setCmImportMsg(
-              `Master loaded from this browser · ${saved.air.length} routes · edit yellow cells anytime`,
+              `Saved rates loaded · ${saved.air.length} routes`,
             )
             masterHydratedRef.current = true
             return
@@ -255,9 +259,7 @@ export function OriginCostDeskSite() {
           parseCmMasterFromWorkbook(wb, 'WAC_Air_Quotation_Simulator.xlsx'),
         )
         setMaster(next)
-        setCmImportMsg(
-          'Default Master from Excel — yellow cells are editable; changes stay in this browser',
-        )
+        setCmImportMsg('Default Master rates loaded')
       } catch {
         // ignore
       } finally {
@@ -507,16 +509,6 @@ export function OriginCostDeskSite() {
     return filterLinesForPdf(deskQuote.lines, exceptionDraft)
   }, [deskQuote, exceptionDraft])
 
-  const handleCalculate = () => {
-    if (!origin || !destination) return
-    if (!master) return
-    setIsLoading(true)
-    window.setTimeout(() => {
-      setIsLoading(false)
-      setTab('input')
-    }, 350)
-  }
-
   const addOtherRow = () => {
     setExtraOthers((rows) => [
       ...rows,
@@ -617,7 +609,7 @@ export function OriginCostDeskSite() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.ctrlKey && event.key === 'Enter') {
         event.preventDefault()
-        handleCalculate()
+        setTab('quote')
         return
       }
       if (event.altKey && event.key === '1') {
@@ -643,7 +635,7 @@ export function OriginCostDeskSite() {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [tab, master, origin, destination])
+  }, [tab])
 
   const copyTable = async () => {
     if (!deskQuote) return
@@ -1070,12 +1062,12 @@ export function OriginCostDeskSite() {
     .sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)))
     .slice(0, 40)
   const historyPanel = (
-    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+    <div className="desk-panel px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-extrabold text-slate-800">Repeat cases & history</p>
+          <p className="text-sm font-bold text-slate-800">Repeat cases & history</p>
           <p className="mt-0.5 text-[11px] font-semibold text-slate-500">
-            Pin a case once. Next jobs: click it, change only what is different, Save PDF.
+          Pin a case once. Next jobs: click it, change only what differs, then Save case or Save PDF.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -1132,7 +1124,7 @@ export function OriginCostDeskSite() {
               : 'border-slate-200 bg-white text-slate-600'
           }`}
         >
-          This route {origin}-{destination}
+          This route only ({origin}-{destination})
         </button>
         <button
           type="button"
@@ -1299,164 +1291,122 @@ export function OriginCostDeskSite() {
   )
 
   return (
-    <div className="min-h-screen bg-[#F7ECEB] font-sans text-wac-navy">
-      <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/90 backdrop-blur">
-        <div className="mx-auto flex max-w-[1600px] items-center justify-between px-6 py-3 lg:px-10">
-          <div className="flex items-center gap-3">
-            <img src="/wac-mark-hero.png" alt="WAC" className="h-9 w-auto" />
+    <div className="desk-shell font-sans">
+      <header className="desk-topbar sticky top-0 z-40">
+        <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4 px-4 py-2 lg:px-6">
+          <div className="flex items-center gap-2.5">
+            <img src="/wac-mark-hero.png" alt="WAC" className="h-8 w-auto" />
             <div>
-              <p className="text-[10px] font-bold tracking-[0.22em] text-wac-orange uppercase">
-                Internal Use Only
-              </p>
-              <p className="text-sm font-extrabold text-wac-navy">
+              <p className="text-[13px] font-bold text-wac-navy leading-tight">
                 Origin Cost Desk
               </p>
+              <p className="text-[10px] text-slate-400">Air quotation desk</p>
             </div>
           </div>
-
-          <nav className="overflow-x-auto">
-            <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white p-1 shadow-sm">
-              {(
-                [
-                  ['master', 'Master_DB'],
-                  ['input', 'Input'],
-                  ['quote', 'Quotation'],
-                ] as const
-              ).map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setTab(key)}
-                  className={`rounded-xl px-4 py-2 text-sm font-bold transition ${
-                    tab === key
-                      ? 'bg-wac-navy text-white'
-                      : 'text-slate-500 hover:bg-slate-50 hover:text-wac-navy'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </nav>
-        </div>
-      </header>
-
-      <section className="relative isolate overflow-hidden border-b border-slate-200/70 bg-[#F7ECEB]">
-        <div
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,_#F6E2DE_0%,_#F7ECEB_42%,_#F3F0EF_100%)]"
-          aria-hidden
-        />
-        <div
-          className="pointer-events-none absolute -top-20 left-1/2 h-[420px] w-[720px] -translate-x-1/2 rounded-full bg-[radial-gradient(closest-side,_rgba(240,80,35,0.14),_transparent)]"
-          aria-hidden
-        />
-
-        <div className="relative mx-auto max-w-[1600px] px-6 pt-14 pb-10 lg:px-10">
-          <div className="mx-auto max-w-[760px] text-center">
-            <img
-              src="/wac-mark-hero.png"
-              alt="WAC"
-              className="mx-auto mb-5 h-16 w-auto object-contain sm:h-20"
-            />
-            <h1 className="text-[34px] leading-[1.15] font-extrabold text-wac-navy sm:text-[46px]">
-              Origin Cost Desk
-            </h1>
-          </div>
-
-          <div className="mt-8 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-slate-200 bg-slate-200 sm:grid-cols-4">
-            <div className="bg-white px-4 py-3">
-              <p className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-                Route
-              </p>
-              <p className="mt-1 text-lg font-extrabold text-wac-navy">
-                {origin} → {destination}
-              </p>
-            </div>
-            <div className="bg-white px-4 py-3">
-              <p className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-                Gross / Vol
-              </p>
-              <p className="mt-1 text-lg font-extrabold text-wac-navy">
-                {cargoGross.toFixed(1)} / {chargeableWeight.toFixed(1)}
-              </p>
-            </div>
-            <div className="bg-white px-4 py-3">
-              <p className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
-                Chargeable Wt
-              </p>
-              <p className="mt-1 text-lg font-extrabold text-emerald-700">
-                {effectiveCw.toFixed(1)} KG
-              </p>
-            </div>
-            <div className="bg-wac-navy px-4 py-3">
-              <p className="text-[10px] font-bold tracking-wider text-white/55 uppercase">
-                Quote Total
-              </p>
-              <p className="mt-1 text-lg font-extrabold text-wac-orange">
+          <div className="hidden sm:flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px]">
+            <span className="desk-status-item">
+              <span className="desk-status-label">Route</span>
+              <span className="desk-status-value">{origin}-{destination}</span>
+            </span>
+            <span className="desk-status-item">
+              <span className="desk-status-label">C.W.</span>
+              <span className="desk-status-value accent">{effectiveCw.toFixed(1)} kg</span>
+            </span>
+            <span className="desk-status-item">
+              <span className="desk-status-label">ALL-IN</span>
+              <span className="desk-status-value accent">
+                {deskQuote
+                  ? `${deskQuote.currency} ${deskQuote.allInPerKg.toFixed(2)}/kg`
+                  : '—'}
+              </span>
+            </span>
+            <span className="desk-status-item">
+              <span className="desk-status-label">Total</span>
+              <span className="desk-status-value total">
                 {deskQuote
                   ? `${deskQuote.currency} ${deskQuote.total.toFixed(2)}`
-                  : 'Calculate'}
-              </p>
-            </div>
+                  : '—'}
+              </span>
+            </span>
           </div>
         </div>
-      </section>
+        <nav className="desk-nav">
+          <div className="mx-auto flex max-w-[1600px] px-2 lg:px-4">
+            {(
+              [
+                ['master', 'Master_DB'],
+                ['input', 'Input'],
+                ['quote', 'Quotation'],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setTab(key)}
+                className={`desk-nav-tab ${tab === key ? 'is-active' : ''}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </nav>
+      </header>
 
-      <main className="mx-auto max-w-[1600px] px-6 py-8 lg:px-10">
+      <main className="mx-auto max-w-[1600px] px-4 py-4 lg:px-6 lg:py-5">
         {tab === 'master' ? (
           <div className="space-y-4">
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="desk-panel">
+              <div className="desk-panel-head">
                 <div className="flex items-center gap-2">
-                  <FileSpreadsheet className="h-4 w-4 text-wac-navy" />
-                  <p className="text-[11px] font-bold tracking-wider text-wac-navy uppercase">
-                    Master_DB
-                  </p>
+                  <FileSpreadsheet className="h-4 w-4 text-slate-500" />
+                  <span>Master rates</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <a
+                    href="/excel/WAC_Air_Quotation_Simulator.xlsx"
+                    download
+                    className="desk-btn"
+                  >
+                    Download template
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => cmFileRef.current?.click()}
+                    className="desk-btn desk-btn-primary"
+                  >
+                    Import rates
+                  </button>
                 </div>
               </div>
               {cmImportMsg ? (
-                <p className="mt-2 text-[12px] text-slate-500">{cmImportMsg}</p>
+                <p className="border-b border-slate-100 px-4 py-2 text-[12px] text-slate-500">
+                  {cmImportMsg}
+                </p>
               ) : null}
-              <div className="mt-3 flex flex-wrap gap-2">
-                <a
-                  href="/excel/WAC_Air_Quotation_Simulator.xlsx"
-                  download
-                  className="inline-flex h-9 items-center rounded-lg border border-slate-200 bg-white px-3 text-[11px] font-bold text-slate-700 hover:border-wac-orange"
-                >
-                  Download Excel
-                </a>
-                <button
-                  type="button"
-                  onClick={() => cmFileRef.current?.click()}
-                  className="inline-flex h-9 items-center rounded-lg bg-wac-navy px-3 text-[11px] font-bold text-white hover:bg-[#243447]"
-                >
-                  Import Master_DB
-                </button>
-                <input
-                  ref={cmFileRef}
-                  type="file"
-                  accept=".xlsx,.xls"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0]
-                    e.target.value = ''
-                    if (!file) return
-                    void (async () => {
-                      try {
-                        const next = normalizeMaster(await parseCmMasterFile(file))
-                        setMaster(next)
-                        setCmImportMsg(
-                          `Loaded ${next.air.length} routes · ${next.breaks.map((b) => b.label).join(' / ')} · ${next.local.length} local charges`,
-                        )
-                      } catch (err) {
-                        setCmImportMsg(
-                          err instanceof Error ? err.message : 'Import failed',
-                        )
-                      }
-                    })()
-                  }}
-                />
-              </div>
+              <input
+                ref={cmFileRef}
+                type="file"
+                accept=".xlsx,.xls"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  e.target.value = ''
+                  if (!file) return
+                  void (async () => {
+                    try {
+                      const next = normalizeMaster(await parseCmMasterFile(file))
+                      setMaster(next)
+                      setCmImportMsg(
+                        `Loaded ${next.air.length} routes · ${next.breaks.map((b) => b.label).join(' / ')} · ${next.local.length} local charges`,
+                      )
+                    } catch (err) {
+                      setCmImportMsg(
+                        err instanceof Error ? err.message : 'Import failed',
+                      )
+                    }
+                  })()
+                }}
+              />
             </div>
 
             {master ? (
@@ -1466,17 +1416,17 @@ export function OriginCostDeskSite() {
                   <button
                     type="button"
                     onClick={() => setTab('input')}
-                    className="inline-flex h-11 items-center justify-center rounded-lg bg-wac-navy px-5 text-sm font-bold text-white hover:bg-[#243447]"
+                    className="desk-btn desk-btn-primary h-10 px-5"
                   >
                     Next: Input
                   </button>
                 </div>
               </>
             ) : (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
+              <div className="desk-panel p-8 text-center border-dashed">
                 <Loader2 className="mx-auto mb-4 h-10 w-10 animate-spin text-wac-orange" />
                 <p className="text-sm font-semibold text-slate-600">
-                  Master_DB loading...
+                  Loading Master rates…
                 </p>
               </div>
             )}
@@ -1497,7 +1447,7 @@ export function OriginCostDeskSite() {
               </div>
             ) : null}
             {pinnedCases.length > 0 || recentJobs.length > 0 ? (
-              <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+              <div className="desk-panel px-4 py-3">
                 {pinnedCases.length > 0 ? (
                   <div>
                     <p className="text-[11px] font-bold tracking-wider text-slate-500 uppercase">
@@ -1509,7 +1459,7 @@ export function OriginCostDeskSite() {
                           key={item.id}
                           type="button"
                           onClick={() => reuseQuoteFromHistory(item)}
-                          className="inline-flex h-9 items-center rounded-full bg-wac-navy px-3 text-[12px] font-bold text-white hover:bg-[#243447]"
+                          className="desk-btn-primary desk-btn h-9 text-[12px]"
                         >
                           {item.consignee ? (
                             <span className="text-orange-300">{item.consignee}</span>
@@ -1533,7 +1483,7 @@ export function OriginCostDeskSite() {
                           key={item.id}
                           type="button"
                           onClick={() => reuseQuoteFromHistory(item)}
-                          className="inline-flex h-9 items-center rounded-full border border-slate-200 bg-white px-3 text-[12px] font-bold text-slate-700 hover:border-wac-orange"
+                          className="desk-btn h-9 text-[12px]"
                         >
                           {item.consignee ? (
                             <span className="text-sky-800">{item.consignee}</span>
@@ -1557,17 +1507,29 @@ export function OriginCostDeskSite() {
                 ) : null}
               </div>
             ) : null}
-            <form
-              className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
-              onSubmit={(e) => {
-                e.preventDefault()
-                handleCalculate()
-              }}
-            >
-              <div className="border-b border-slate-200 bg-slate-50 px-5 py-4">
-                <h2 className="text-xl font-extrabold text-white bg-[#243447] px-4 py-2 inline-flex rounded">
-                  항공 가견적 시뮬레이터
+            <div className="desk-panel">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-white px-4 py-2.5">
+                <h2 className="text-[13px] font-bold text-slate-800">
+                  Input · Air quotation
                 </h2>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={!deskQuote}
+                    onClick={() => saveQuoteToHistory()}
+                    className="desk-btn disabled:opacity-40"
+                  >
+                    Save case
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!deskQuote}
+                    onClick={printPdf}
+                    className="desk-btn desk-btn-accent disabled:opacity-40"
+                  >
+                    Save PDF
+                  </button>
+                </div>
               </div>
 
               <div>
@@ -1576,19 +1538,19 @@ export function OriginCostDeskSite() {
                     <tr>
                       <th
                         colSpan={4}
-                        className="bg-[#F05023] px-3 py-2.5 text-left text-white text-sm font-extrabold uppercase tracking-wide"
+                        className="desk-section-title"
                       >
                         1. 화물 입력
                       </th>
                     </tr>
                     <tr className="border-t border-slate-200">
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">Consignee</th>
-                      <td className="bg-[#FFFBEA] px-2 py-2">
+                      <th className="desk-label px-3 py-3 text-left font-bold text-slate-600 uppercase">Consignee</th>
+                      <td className="desk-editable px-2 py-2">
                         <input
                           ref={(el) => {
                             cellRefs.current.consignee = el
                           }}
-                          className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 font-bold shadow-sm outline-none focus:border-wac-orange"
+                          className="desk-input font-bold"
                           value={consignee}
                           onChange={(e) => setConsignee(e.target.value)}
                           onKeyDown={(e) =>
@@ -1601,8 +1563,8 @@ export function OriginCostDeskSite() {
                           placeholder="Customer / Consignee"
                         />
                       </td>
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">BL Count</th>
-                      <td className="bg-[#FFFBEA] px-2 py-2">
+                      <th className="desk-label px-3 py-3 text-left font-bold text-slate-600 uppercase">BL Count</th>
+                      <td className="desk-editable px-2 py-2">
                         <input
                           ref={(el) => {
                             cellRefs.current.blCount = el
@@ -1615,37 +1577,35 @@ export function OriginCostDeskSite() {
                             })
                           }
                           type="text"
-                          className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 shadow-sm outline-none focus:border-wac-orange"
+                          className="desk-input"
                           value={blCountDraft}
                           onChange={(e) => setBlCountDraft(e.target.value)}
                         />
                       </td>
                     </tr>
                     <tr className="border-t border-slate-200">
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">Route</th>
-                      <td className="bg-[#FFFBEA] px-3 py-2">
+                      <th className="desk-label px-3 py-3 text-left font-bold text-slate-600 uppercase">Route</th>
+                      <td className="desk-editable px-3 py-2">
                         <div ref={routePickerWrapRef} className="relative">
-                          <input
-                            ref={(el) => {
+                          <DraftTextInput
+                            inputRef={(el) => {
                               cellRefs.current.route = el
                             }}
-                            className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 font-bold uppercase shadow-sm outline-none focus:border-wac-orange text-center"
-                            value={`${origin}${destination ? `-${destination}` : ''}`}
-                            onChange={(e) => {
-                              const v = e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, '')
-                              const dash = v.indexOf('-')
-                              if (dash < 0) {
-                                setOrigin(v.slice(0, 8))
-                                setDestination('')
-                                return
-                              }
-                              setOrigin(v.slice(0, dash).slice(0, 8))
-                              setDestination(
-                                v.slice(dash + 1).replace(/-/g, '').slice(0, 8),
-                              )
+                            className="desk-input font-bold uppercase text-center"
+                            value={formatRoute(origin, destination)}
+                            normalize={(v) =>
+                              v.toUpperCase().replace(/[^A-Z0-9-]/g, '')
+                            }
+                            onCommit={(raw) => {
+                              const parsed = parseRouteDraft(raw)
+                              setOrigin(parsed.origin)
+                              setDestination(parsed.destination)
                             }}
                             onFocus={() => setRoutePickerOpen(true)}
                             onClick={() => setRoutePickerOpen(true)}
+                            onBlur={() => {
+                              window.setTimeout(() => setRoutePickerOpen(false), 150)
+                            }}
                             onKeyDown={(e) =>
                               handleCellNav(e, {
                                 enter: `${cargoPieces[0]?.id}-l`,
@@ -1700,29 +1660,29 @@ export function OriginCostDeskSite() {
                           ) : null}
                         </div>
                       </td>
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">C.W.</th>
-                      <td className="bg-emerald-50 px-3 py-2 text-center">
-                        <span className="text-lg font-extrabold text-emerald-700">{effectiveCw.toFixed(2)}</span>
+                      <th className="desk-label px-3 py-3 text-left font-bold text-slate-600 uppercase">C.W.</th>
+                      <td className="desk-computed text-center">
+                        <span className="text-base font-bold">{effectiveCw.toFixed(2)}</span>
                       </td>
                     </tr>
                     <tr className="border-t border-slate-200">
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">Gross (kg)</th>
-                      <td className="bg-white px-3 py-2 text-center">
-                        <span className="text-lg font-extrabold text-wac-navy">{cargoGross.toFixed(1)}</span>
+                      <th className="desk-label uppercase">Gross (kg)</th>
+                      <td className="desk-readonly text-center">
+                        <span className="text-base font-bold">{cargoGross.toFixed(1)}</span>
                       </td>
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase"></th>
-                      <td className="bg-white px-3 py-2"></td>
+                      <th className="desk-label"></th>
+                      <td className="desk-readonly"></td>
                     </tr>
                     <tr className="border-t border-slate-200">
-                      <th className="bg-[#F4F7FB] px-3 py-3 align-top text-left font-bold text-slate-600 uppercase">
+                      <th className="desk-label px-3 py-3 align-top text-left font-bold text-slate-600 uppercase">
                         Cargo Detail
                       </th>
                       <td colSpan={3} className="bg-white px-3 py-3">
                         <div className="space-y-3">
-                          <div className="rounded-lg border border-slate-200">
+                          <div className="border border-slate-200">
                             <table className="w-full table-fixed border-collapse text-[12px]">
                               <thead>
-                                <tr className="bg-[#243447] text-white">
+                                <tr className="desk-section-title">
                                   <th className="w-28 px-3 py-2 text-left font-bold uppercase">Spec</th>
                                   {pieceMetrics.map((piece, index) => (
                                     <th
@@ -1739,9 +1699,9 @@ export function OriginCostDeskSite() {
                               </thead>
                               <tbody>
                                 <tr className="border-t border-slate-200">
-                                  <th className="bg-[#F4F7FB] px-3 py-2 text-left font-bold text-slate-600 uppercase">L (cm)</th>
+                                  <th className="desk-label px-3 py-2 text-left font-bold text-slate-600 uppercase">L (cm)</th>
                                   {cargoPieces.map((piece, pieceIndex) => (
-                                    <td key={`${piece.id}-l`} className="bg-[#FFFBEA] px-2 py-2">
+                                    <td key={`${piece.id}-l`} className="desk-editable px-2 py-2">
                                       <input
                                         ref={(el) => { cellRefs.current[`${piece.id}-l`] = el }}
                                         onKeyDown={(e) =>
@@ -1755,7 +1715,7 @@ export function OriginCostDeskSite() {
                                         }
                                         type="text"
                                         onPaste={handleCargoPaste(pieceIndex)}
-                                        className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center shadow-sm outline-none focus:border-wac-orange"
+                                        className="desk-input text-center"
                                         value={piece.length}
                                         onChange={(e) =>
                                           setCargoPieces((rows) =>
@@ -1770,9 +1730,9 @@ export function OriginCostDeskSite() {
                                   <td className="bg-slate-50 px-3 py-2 text-center text-slate-400">-</td>
                                 </tr>
                                 <tr className="border-t border-slate-200">
-                                  <th className="bg-[#F4F7FB] px-3 py-2 text-left font-bold text-slate-600 uppercase">W (cm)</th>
+                                  <th className="desk-label px-3 py-2 text-left font-bold text-slate-600 uppercase">W (cm)</th>
                                   {cargoPieces.map((piece, pieceIndex) => (
-                                    <td key={`${piece.id}-w`} className="bg-[#FFFBEA] px-2 py-2">
+                                    <td key={`${piece.id}-w`} className="desk-editable px-2 py-2">
                                       <input
                                         ref={(el) => { cellRefs.current[`${piece.id}-w`] = el }}
                                         onKeyDown={(e) =>
@@ -1786,7 +1746,7 @@ export function OriginCostDeskSite() {
                                         }
                                         type="text"
                                         onPaste={handleCargoPaste(pieceIndex)}
-                                        className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center shadow-sm outline-none focus:border-wac-orange"
+                                        className="desk-input text-center"
                                         value={piece.width}
                                         onChange={(e) =>
                                           setCargoPieces((rows) =>
@@ -1801,9 +1761,9 @@ export function OriginCostDeskSite() {
                                   <td className="bg-slate-50 px-3 py-2 text-center text-slate-400">-</td>
                                 </tr>
                                 <tr className="border-t border-slate-200">
-                                  <th className="bg-[#F4F7FB] px-3 py-2 text-left font-bold text-slate-600 uppercase">H (cm)</th>
+                                  <th className="desk-label px-3 py-2 text-left font-bold text-slate-600 uppercase">H (cm)</th>
                                   {cargoPieces.map((piece, pieceIndex) => (
-                                    <td key={`${piece.id}-h`} className="bg-[#FFFBEA] px-2 py-2">
+                                    <td key={`${piece.id}-h`} className="desk-editable px-2 py-2">
                                       <input
                                         ref={(el) => { cellRefs.current[`${piece.id}-h`] = el }}
                                         onKeyDown={(e) =>
@@ -1817,7 +1777,7 @@ export function OriginCostDeskSite() {
                                         }
                                         type="text"
                                         onPaste={handleCargoPaste(pieceIndex)}
-                                        className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center shadow-sm outline-none focus:border-wac-orange"
+                                        className="desk-input text-center"
                                         value={piece.height}
                                         onChange={(e) =>
                                           setCargoPieces((rows) =>
@@ -1832,9 +1792,9 @@ export function OriginCostDeskSite() {
                                   <td className="bg-slate-50 px-3 py-2 text-center text-slate-400">-</td>
                                 </tr>
                                 <tr className="border-t border-slate-200">
-                                  <th className="bg-[#F4F7FB] px-3 py-2 text-left font-bold text-slate-600 uppercase">Qty</th>
+                                  <th className="desk-label px-3 py-2 text-left font-bold text-slate-600 uppercase">Qty</th>
                                   {cargoPieces.map((piece, pieceIndex) => (
-                                    <td key={`${piece.id}-qty`} className="bg-[#FFFBEA] px-2 py-2">
+                                    <td key={`${piece.id}-qty`} className="desk-editable px-2 py-2">
                                       <input
                                         ref={(el) => { cellRefs.current[`${piece.id}-qty`] = el }}
                                         onKeyDown={(e) =>
@@ -1848,7 +1808,7 @@ export function OriginCostDeskSite() {
                                         }
                                         type="text"
                                         onPaste={handleCargoPaste(pieceIndex)}
-                                        className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center shadow-sm outline-none focus:border-wac-orange"
+                                        className="desk-input text-center"
                                         value={piece.qty}
                                         onChange={(e) =>
                                           setCargoPieces((rows) =>
@@ -1860,12 +1820,12 @@ export function OriginCostDeskSite() {
                                       />
                                     </td>
                                   ))}
-                                  <td className="bg-emerald-50 px-3 py-2 text-center font-bold text-emerald-700">{cargoQty}</td>
+                                  <td className="desk-computed">{cargoQty}</td>
                                 </tr>
                                 <tr className="border-t border-slate-200">
-                                  <th className="bg-[#F4F7FB] px-3 py-2 text-left font-bold text-slate-600 uppercase">Gross</th>
+                                  <th className="desk-label px-3 py-2 text-left font-bold text-slate-600 uppercase">Gross</th>
                                   {cargoPieces.map((piece, index) => (
-                                    <td key={`${piece.id}-gross`} className="bg-[#FFFBEA] px-2 py-2">
+                                    <td key={`${piece.id}-gross`} className="desk-editable px-2 py-2">
                                       <input
                                         ref={(el) => { cellRefs.current[`${piece.id}-gross`] = el }}
                                         onKeyDown={(e) =>
@@ -1879,7 +1839,7 @@ export function OriginCostDeskSite() {
                                         }
                                         type="text"
                                         onPaste={handleCargoPaste(index)}
-                                        className="h-10 w-full rounded-md border border-amber-200 bg-white px-3 text-center shadow-sm outline-none focus:border-wac-orange"
+                                        className="desk-input text-center"
                                         value={piece.gross}
                                         onChange={(e) =>
                                           setCargoPieces((rows) =>
@@ -1891,25 +1851,25 @@ export function OriginCostDeskSite() {
                                       />
                                     </td>
                                   ))}
-                                  <td className="bg-emerald-50 px-3 py-2 text-center font-bold text-emerald-700">{cargoGross.toFixed(1)}</td>
+                                  <td className="desk-computed">{cargoGross.toFixed(1)}</td>
                                 </tr>
                                 <tr className="border-t border-slate-200">
-                                  <th className="bg-[#F4F7FB] px-3 py-2 text-left font-bold text-slate-600 uppercase">CBM</th>
+                                  <th className="desk-label px-3 py-2 text-left font-bold text-slate-600 uppercase">CBM</th>
                                   {pieceMetrics.map((piece) => (
                                     <td key={`${piece.id}-cbm`} className="bg-white px-3 py-2 text-center font-semibold text-wac-navy">
                                       {piece.cbmValue > 0 ? piece.cbmValue.toFixed(3) : '-'}
                                     </td>
                                   ))}
-                                  <td className="bg-emerald-50 px-3 py-2 text-center font-bold text-emerald-700">{cargoCbm.toFixed(3)}</td>
+                                  <td className="desk-computed">{cargoCbm.toFixed(3)}</td>
                                 </tr>
                                 <tr className="border-t border-slate-200">
-                                  <th className="bg-[#243447] px-3 py-2 text-left font-bold text-white uppercase">C.W.</th>
+                                  <th className="desk-label uppercase">C.W.</th>
                                   {pieceMetrics.map((piece) => (
-                                    <td key={`${piece.id}-cw`} className="bg-emerald-50 px-3 py-2 text-center font-bold text-emerald-700">
+                                    <td key={`${piece.id}-cw`} className="desk-computed">
                                       {piece.cwValue > 0 ? piece.cwValue.toFixed(2) : '-'}
                                     </td>
                                   ))}
-                                  <td className="bg-emerald-100 px-3 py-2 text-center font-black text-emerald-700">{effectiveCw.toFixed(2)}</td>
+                                  <td className="desk-computed text-center font-black">{effectiveCw.toFixed(2)}</td>
                                 </tr>
                               </tbody>
                             </table>
@@ -1923,29 +1883,29 @@ export function OriginCostDeskSite() {
                       </th>
                     </tr>
                     <tr className="border-t border-slate-200">
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">CBM</th>
-                      <td className="bg-emerald-50 px-3 py-2 font-black text-emerald-700">{cargoCbm.toFixed(3)}</td>
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">실중량합</th>
-                      <td className="bg-emerald-50 px-3 py-2 font-black text-emerald-700">{cargoGross.toFixed(2)}</td>
+                      <th className="desk-label px-3 py-3 text-left font-bold text-slate-600 uppercase">CBM</th>
+                      <td className="desk-computed font-bold">{cargoCbm.toFixed(3)}</td>
+                      <th className="desk-label px-3 py-3 text-left font-bold text-slate-600 uppercase">실중량합</th>
+                      <td className="desk-computed font-bold">{cargoGross.toFixed(2)}</td>
                     </tr>
                     <tr className="border-t border-slate-200">
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">볼륨중량</th>
-                      <td className="bg-emerald-50 px-3 py-2 font-black text-emerald-700">{chargeableWeight.toFixed(2)}</td>
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">C.W.</th>
-                      <td className="bg-emerald-100 px-3 py-2 font-black text-emerald-800">{effectiveCw.toFixed(2)}</td>
+                      <th className="desk-label px-3 py-3 text-left font-bold text-slate-600 uppercase">볼륨중량</th>
+                      <td className="desk-computed font-bold">{chargeableWeight.toFixed(2)}</td>
+                      <th className="desk-label px-3 py-3 text-left font-bold text-slate-600 uppercase">C.W.</th>
+                      <td className="desk-computed font-bold">{effectiveCw.toFixed(2)}</td>
                     </tr>
                     <tr className="border-t border-slate-200">
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">Break</th>
+                      <th className="desk-label px-3 py-3 text-left font-bold text-slate-600 uppercase">Break</th>
                       <td className="bg-white px-3 py-2 text-center font-bold text-slate-600">
                         {deskQuote ? deskQuote.breakLabel : ''}
                       </td>
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">Air Rate</th>
+                      <th className="desk-label px-3 py-3 text-left font-bold text-slate-600 uppercase">Air Rate</th>
                       <td className="bg-white px-3 py-2 text-center font-bold text-slate-600">
                         {deskQuote ? deskQuote.airRate.toFixed(2) : ''}
                       </td>
                     </tr>
                     <tr className="border-t border-slate-200">
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">Air MIN</th>
+                      <th className="desk-label px-3 py-3 text-left font-bold text-slate-600 uppercase">Air MIN</th>
                       <td className="bg-white px-3 py-2 text-center font-bold text-slate-600">
                         {routeRow
                           ? routeRow.min.toFixed(2)
@@ -1953,58 +1913,50 @@ export function OriginCostDeskSite() {
                             ? deskQuote.airMin.toFixed(2)
                             : ''}
                       </td>
-                      <th className="bg-[#F4F7FB] px-3 py-3" />
+                      <th className="desk-label px-3 py-3" />
                       <td className="bg-white px-3 py-2" />
                     </tr>
                     <tr className="border-t border-slate-200">
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">FSC /kg</th>
+                      <th className="desk-label px-3 py-3 text-left font-bold text-slate-600 uppercase">FSC /kg</th>
                       <td className="bg-white px-3 py-2 text-center font-bold text-slate-600">
                         {routeRow ? routeRow.fsc.toFixed(2) : deskQuote ? deskQuote.fscPerKg.toFixed(2) : ''}
                       </td>
-                      <th className="bg-[#F4F7FB] px-3 py-3 text-left font-bold text-slate-600 uppercase">SSC /kg</th>
+                      <th className="desk-label px-3 py-3 text-left font-bold text-slate-600 uppercase">SSC /kg</th>
                       <td className="bg-white px-3 py-2 text-center font-bold text-slate-600">
                         {routeRow ? routeRow.ssc.toFixed(2) : deskQuote ? deskQuote.sscPerKg.toFixed(2) : ''}
+                      </td>
+                    </tr>
+                    <tr className="border-t border-slate-200">
+                      <th className="desk-label px-3 py-3 text-left font-bold text-slate-600 uppercase">ALL-IN /kg</th>
+                      <td colSpan={3} className="desk-computed text-center font-bold">
+                        {deskQuote
+                          ? `${deskQuote.currency} ${deskQuote.allInPerKg.toFixed(2)} · ${deskQuote.breakLabel} (Air + FSC + SSC)`
+                          : ''}
                       </td>
                     </tr>
                   </tbody>
                 </table>
               </div>
-
-              <div className="flex gap-3 border-t border-slate-200 px-5 py-4">
-                <button
-                  type="submit"
-                  disabled={isLoading || !master}
-                  className="flex h-11 items-center justify-center gap-2 rounded-lg bg-wac-orange px-4 text-sm font-bold text-white shadow-lg shadow-[#F05023]/25 disabled:opacity-60"
-                >
-                  {isLoading ? 'Calculating...' : 'Calculate'}
-                </button>
-              </div>
-            </form>
+            </div>
 
             {!master ? (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
+              <div className="desk-panel p-8 text-center border-dashed">
                 <p className="text-sm font-semibold text-slate-600">
-                  Load Master_DB first.
+                  Load Master rates first.
                 </p>
               </div>
             ) : (
-              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <div className="border-b border-slate-100 bg-slate-50 px-5 py-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="text-[11px] font-bold tracking-wider text-wac-navy uppercase">
-                        3. 비용 내역
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={addOtherRow}
-                      className="inline-flex items-center gap-1 rounded-lg border border-wac-orange bg-white px-3 py-2 text-[11px] font-bold text-wac-orange hover:bg-orange-50"
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      Add Other
-                    </button>
-                  </div>
+              <div className="desk-panel">
+                <div className="desk-panel-head">
+                  <span>3. 비용 내역</span>
+                  <button
+                    type="button"
+                    onClick={addOtherRow}
+                    className="desk-btn gap-1 text-wac-orange border-orange-200"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    Add Other
+                  </button>
                 </div>
                 <div className="max-w-full">
                   <table className="w-full table-fixed text-left text-[13px]">
@@ -2017,13 +1969,13 @@ export function OriginCostDeskSite() {
                       <col className="w-[6%]" />
                     </colgroup>
                     <thead>
-                      <tr className="bg-[#243447] text-white text-[10px] font-bold uppercase tracking-wider">
-                        <th className="px-3 py-2.5">항목</th>
-                        <th className="px-3 py-2.5">단위</th>
+                      <tr className="bg-slate-800 text-white text-[11px] font-bold">
+                        <th className="px-3 py-2.5 text-left">Charge</th>
+                        <th className="px-3 py-2.5 text-left">Unit</th>
                         <th className="px-3 py-2.5 text-right">참고</th>
-                        <th className="px-3 py-2.5 text-right">예외(J)</th>
-                        <th className="px-3 py-2.5 text-right">TOTAL</th>
-                        <th className="w-12 px-3 py-2.5 text-center">삭제</th>
+                        <th className="px-3 py-2.5 text-right">예외 (J)</th>
+                        <th className="px-3 py-2.5 text-right">Amount</th>
+                        <th className="w-10 px-2 py-2.5" />
                       </tr>
                     </thead>
                     <tbody>
@@ -2088,7 +2040,7 @@ export function OriginCostDeskSite() {
                                       right: thisUnitCellId,
                                     })
                                   }
-                                  className="h-9 w-full rounded border border-yellow-200 bg-yellow-50 px-2 text-[12px] font-semibold outline-none focus:border-wac-orange"
+                                  className="desk-input text-[12px] font-semibold"
                                 />
                               ) : (
                                 <span className="font-semibold text-wac-navy">
@@ -2153,7 +2105,7 @@ export function OriginCostDeskSite() {
                                 l.ref.toFixed(2)
                               )}
                             </td>
-                            <td className="px-3 py-2.5 text-right">
+                            <td className="desk-editable px-2 py-1.5 text-right">
                               <input
                                 ref={(el) => {
                                   cellRefs.current[thisExcCellId] = el
@@ -2175,7 +2127,7 @@ export function OriginCostDeskSite() {
                                     [l.id]: e.target.value,
                                   }))
                                 }
-                                className="h-9 w-full rounded border border-yellow-200 bg-yellow-50 px-2 text-right text-[12px] font-medium outline-none focus:border-wac-orange"
+                                className="desk-input text-right text-[12px]"
                               />
                             </td>
                             <td className="px-3 py-2.5 text-right font-bold text-slate-900">
@@ -2202,11 +2154,11 @@ export function OriginCostDeskSite() {
                       })}
                     </tbody>
                     <tfoot>
-                      <tr className="border-t-2 border-[#F05023] bg-[#F05023]">
-                        <td colSpan={4} className="px-3 py-3 text-right text-[11px] font-bold tracking-wider text-white uppercase">
+                      <tr className="desk-total-bar">
+                        <td colSpan={4} className="px-3 py-3 text-right text-[11px] font-bold tracking-wider uppercase">
                           Total Appx. Amount
                         </td>
-                        <td className="px-3 py-3 text-right text-lg font-black text-white">
+                        <td className="amount px-3 py-3 text-right text-lg">
                           {deskQuote?.currency} {deskQuote?.total.toFixed(2)}
                         </td>
                         <td />
@@ -2216,10 +2168,10 @@ export function OriginCostDeskSite() {
                 </div>
                 <div className="mt-4 rounded-lg border border-slate-200 bg-white px-4 py-3">
                   <div className="grid grid-cols-[140px_1fr] gap-x-4 gap-y-2">
-                    <div className="bg-[#F4F7FB] px-3 py-2 text-xs font-bold text-slate-600">Currency</div>
+                    <div className="desk-label px-3 py-2 text-xs font-bold text-slate-600">Currency</div>
                     <div className="px-3 py-2 text-sm font-extrabold text-slate-800">{deskQuote?.currency}</div>
-                    <div className="bg-[#F4F7FB] px-3 py-2 text-xs font-bold text-slate-600">Ex.Rate</div>
-                    <div className="bg-[#FFFBEA] px-3 py-2">
+                    <div className="desk-label px-3 py-2 text-xs font-bold text-slate-600">Ex.Rate</div>
+                    <div className="desk-editable px-3 py-2">
                       <input
                         ref={(el) => {
                           cellRefs.current.fx = el
@@ -2231,22 +2183,22 @@ export function OriginCostDeskSite() {
                           })
                         }
                         type="text"
-                        className="h-9 w-full rounded-md border border-amber-200 bg-white px-2 text-sm font-bold text-slate-800 shadow-sm outline-none focus:border-wac-orange"
+                        className="desk-input text-sm font-bold"
                         value={fxDraft}
                         onChange={(e) => setFxDraft(e.target.value)}
                       />
                       <p className="mt-1 text-[10px] text-slate-500">
-                        Excel과 동일: Currency가 HKD이면 TOTAL × Ex.Rate (USD는 그대로)
+                        HKD routes: TOTAL × Ex.Rate
                       </p>
                     </div>
-                    <div className="bg-[#F4F7FB] px-3 py-2 text-xs font-bold text-slate-600">Route</div>
+                    <div className="desk-label px-3 py-2 text-xs font-bold text-slate-600">Route</div>
                     <div className="px-3 py-2 text-sm font-bold text-slate-800">{deskQuote?.route}</div>
-                    <div className="bg-[#F4F7FB] px-3 py-2 text-xs font-bold text-slate-600">C.W.</div>
-                    <div className="px-3 py-2 text-sm font-extrabold text-emerald-800 bg-emerald-50 rounded">{
+                    <div className="desk-label px-3 py-2 text-xs font-bold text-slate-600">C.W.</div>
+                    <div className="desk-computed text-sm font-bold">{
                       deskQuote?.cw.toFixed(2)
                     }</div>
-                    <div className="bg-[#F4F7FB] px-3 py-2 text-xs font-bold text-slate-600">Carrier</div>
-                    <div className="bg-[#FFFBEA] px-3 py-2">
+                    <div className="desk-label px-3 py-2 text-xs font-bold text-slate-600">Carrier</div>
+                    <div className="desk-editable px-3 py-2">
                       <input
                         ref={(el) => {
                           cellRefs.current.carrier = el
@@ -2258,13 +2210,13 @@ export function OriginCostDeskSite() {
                             up: 'fx',
                           })
                         }
-                        className="h-9 w-full rounded-md border border-amber-200 bg-white px-2 text-sm font-bold uppercase text-slate-800 shadow-sm outline-none focus:border-wac-orange"
+                        className="desk-input text-sm font-bold uppercase"
                         value={carrierCode}
                         onChange={(e) => setCarrierCode(e.target.value.toUpperCase())}
                       />
                     </div>
-                    <div className="bg-[#F4F7FB] px-3 py-2 text-xs font-bold text-slate-600">Remark</div>
-                    <div className="bg-[#FFFBEA] px-3 py-2">
+                    <div className="desk-label px-3 py-2 text-xs font-bold text-slate-600">Remark</div>
+                    <div className="desk-editable px-3 py-2">
                       <input
                         ref={(el) => {
                           cellRefs.current.remark = el
@@ -2276,7 +2228,7 @@ export function OriginCostDeskSite() {
                             up: 'carrier',
                           })
                         }
-                        className="h-9 w-full rounded-md border border-amber-200 bg-white px-2 text-sm font-bold text-slate-800 shadow-sm outline-none focus:border-wac-orange"
+                        className="desk-input text-sm font-bold"
                         value={deskRemark}
                         onChange={(e) => setDeskRemark(e.target.value)}
                         placeholder=""
@@ -2288,7 +2240,7 @@ export function OriginCostDeskSite() {
                   <button
                     type="button"
                     onClick={() => setTab('quote')}
-                    className="inline-flex h-11 items-center justify-center rounded-lg bg-wac-navy px-5 text-sm font-bold text-white hover:bg-[#243447]"
+                    className="desk-btn desk-btn-primary h-10 px-5"
                   >
                     Next: Quotation
                   </button>
@@ -2307,25 +2259,24 @@ export function OriginCostDeskSite() {
               </div>
             ) : null}
             {!deskQuote ? (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
+              <div className="desk-panel p-8 text-center border-dashed">
                 <p className="text-sm font-semibold text-slate-600">
-                  No live quote yet. Reuse a history row into Input, or calculate from Input.
+                  No quotation yet. Open Input or reuse a history case.
                 </p>
               </div>
             ) : (
               <>
-                <div className="rounded-2xl border border-orange-200 bg-orange-50 p-5">
+                <div className="desk-panel p-4">
                   <div className="flex flex-wrap items-center justify-between gap-4">
                     <div>
-                      <p className="mb-1 text-[11px] font-bold tracking-[0.22em] text-wac-orange uppercase">
-                        Quotation
-                      </p>
-                      <p className="text-3xl font-black text-wac-navy sm:text-4xl">
+                      <p className="text-[12px] font-medium text-slate-400">Quotation total</p>
+                      <p className="text-2xl font-bold text-wac-orange tabular-nums">
                         {deskQuote.currency} {deskQuote.total.toFixed(2)}
                       </p>
-                      <p className="mt-1 text-sm text-slate-600">
+                      <p className="mt-1 text-[13px] text-slate-500">
                         Route {deskQuote.route} · Break {deskQuote.breakLabel} ·
-                        C.W. {deskQuote.cw.toFixed(2)} / CBM {deskQuote.cbm.toFixed(3)}
+                        C.W. {deskQuote.cw.toFixed(2)} / CBM {deskQuote.cbm.toFixed(3)} ·
+                        ALL-IN {deskQuote.currency} {deskQuote.allInPerKg.toFixed(2)}/kg
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -2333,7 +2284,7 @@ export function OriginCostDeskSite() {
                         <button
                           type="button"
                           onClick={openLoadedHistoryPdf}
-                          className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 hover:border-wac-orange"
+                          className="desk-btn h-10"
                         >
                           Open saved PDF quote
                         </button>
@@ -2341,14 +2292,14 @@ export function OriginCostDeskSite() {
                       <button
                         type="button"
                         onClick={() => void copyTable()}
-                        className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 hover:border-wac-orange"
+                        className="desk-btn h-10"
                       >
                         Copy table
                       </button>
                       <button
                         type="button"
                         onClick={printPdf}
-                        className="inline-flex h-10 items-center justify-center rounded-lg bg-wac-navy px-4 text-sm font-bold text-white hover:bg-[#243447]"
+                        className="desk-btn desk-btn-accent h-10"
                       >
                         Save PDF
                       </button>
@@ -2358,35 +2309,35 @@ export function OriginCostDeskSite() {
 
                 <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
                   <div className="grid grid-cols-[170px_1fr] gap-x-4 gap-y-2">
-                    <div className="bg-[#F4F7FB] px-3 py-2 text-xs font-bold text-slate-600">Route</div>
+                    <div className="desk-label px-3 py-2 text-xs font-bold text-slate-600">Route</div>
                     <div className="px-3 py-2 text-sm font-extrabold text-slate-800">{deskQuote.route}</div>
 
-                    <div className="bg-[#F4F7FB] px-3 py-2 text-xs font-bold text-slate-600">Cargo</div>
+                    <div className="desk-label px-3 py-2 text-xs font-bold text-slate-600">Cargo</div>
                     <div className="px-3 py-2 text-sm font-bold text-slate-800">{cargoSummary}</div>
 
-                    <div className="bg-[#F4F7FB] px-3 py-2 text-xs font-bold text-slate-600">C.W.</div>
-                    <div className="px-3 py-2 text-sm font-extrabold text-emerald-800 bg-emerald-50 rounded">
-                      {deskQuote.cw.toFixed(2)} kg · Break {deskQuote.breakLabel}
+                    <div className="desk-label px-3 py-2 text-xs font-bold text-slate-600">C.W.</div>
+                    <div className="desk-computed text-sm font-bold">
+                      {deskQuote.cw.toFixed(2)} kg · Break {deskQuote.breakLabel} · ALL-IN {deskQuote.currency} {deskQuote.allInPerKg.toFixed(2)}/kg
                     </div>
 
-                    <div className="bg-[#F4F7FB] px-3 py-2 text-xs font-bold text-slate-600">Currency / FX</div>
+                    <div className="desk-label px-3 py-2 text-xs font-bold text-slate-600">Currency / FX</div>
                     <div className="px-3 py-2 text-sm font-bold text-slate-800">
                       {deskQuote.currency} · Ex.Rate {deskQuote.fx.toFixed(4)}
                     </div>
 
-                    <div className="bg-[#F4F7FB] px-3 py-2 text-xs font-bold text-slate-600">Carrier</div>
+                    <div className="desk-label px-3 py-2 text-xs font-bold text-slate-600">Carrier</div>
                     <div className="px-3 py-2 text-sm font-bold text-slate-800">{carrierCode}</div>
 
                     {deskRemark.trim() ? (
                       <>
-                        <div className="bg-[#F4F7FB] px-3 py-2 text-xs font-bold text-slate-600">Remark</div>
+                        <div className="desk-label px-3 py-2 text-xs font-bold text-slate-600">Remark</div>
                         <div className="px-3 py-2 text-sm font-bold text-slate-800">{deskRemark}</div>
                       </>
                     ) : null}
                   </div>
                 </div>
 
-                <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="desk-panel">
                   <div className="border-b border-slate-100 bg-slate-50 px-5 py-4">
                     <p className="text-[11px] font-bold tracking-wider text-wac-navy uppercase">
                       Quotation
@@ -2415,14 +2366,14 @@ export function OriginCostDeskSite() {
                             </td>
                           </tr>
                         ))}
-                        <tr className="border-t border-[#F05023] bg-[#F05023]">
+                        <tr className="desk-total-bar">
                           <td
                             colSpan={2}
-                            className="px-3 py-2 text-right text-[13px] font-extrabold text-white"
+                            className="px-3 py-2.5 text-right text-[12px] font-bold uppercase"
                           >
                             TOTAL APPX. AMOUNT
                           </td>
-                          <td className="px-3 py-2 text-right text-[14px] font-black text-white">
+                          <td className="amount px-3 py-2.5 text-right text-[14px]">
                             {deskQuote.currency} {deskQuote.total.toFixed(2)}
                           </td>
                         </tr>

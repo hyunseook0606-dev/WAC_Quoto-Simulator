@@ -28,6 +28,8 @@ export type CmLocalRate = {
   unit: string
   rate: number
   min: number
+  /** Master_DB column E — e.g. "C.W. kg" (default) or "G.W. kg" */
+  note?: string
 }
 
 export type CmMaster = {
@@ -267,6 +269,7 @@ export function parseCmMasterFromWorkbook(
         unit: String(cell(rows, r, 1) ?? ''),
         rate: num(cell(rows, r, 2)),
         min: num(cell(rows, r, 3)),
+        note: String(cell(rows, r, 4) ?? '').trim() || undefined,
       })
     }
   }

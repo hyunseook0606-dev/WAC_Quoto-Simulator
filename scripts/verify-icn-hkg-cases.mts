@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import * as XLSX from 'xlsx'
-import { parseCmMasterFromWorkbook, pickWeightBreak } from '../src/origin-cost-desk/cmExcelMaster.ts'
+import { parseCmMasterFromWorkbook } from '../src/origin-cost-desk/cmExcelMaster.ts'
 import { calcCmDeskQuote } from '../src/origin-cost-desk/cmDeskQuote.ts'
 
 const buf = readFileSync('public/excel/WAC_Air_Quotation_Simulator.xlsx')
@@ -13,13 +13,15 @@ console.log('Breaks:', master.breaks.map((b) => `${b.label}@${b.minKg}`).join(',
 
 type Case = {
   name: string
-  input: Parameters<typeof calcCmDeskQuote>[1]
+  input: Parameters<typeof calcCmDeskQuote>[1] & { _terminalNote?: string }
   expect: {
     cw?: number
     breakLabel?: string
     airRate?: number
     airAmountMin?: number
     truckingMin?: number
+    terminalAmount?: number
+    total?: number
   }
 }
 
@@ -107,13 +109,65 @@ const cases: Case[] = [
       airRate: 3.8,
     },
   },
+  {
+    name: 'CASE E — Chocolate HKG-ICN (KEEP COOL)',
+    input: {
+      origin: 'HKG',
+      destination: 'ICN',
+      length: 110,
+      width: 110,
+      height: 109,
+      qty: 1,
+      gross: 194.5,
+      fx: 1,
+      blCount: 1,
+      exceptions: {
+        handling: 321,
+        doc: 15,
+        trucking: 0,
+      },
+    },
+    expect: {
+      cw: 220.26,
+      breakLabel: '+100',
+      airRate: 25,
+      total: 10048.75,
+    },
+  },
+  {
+    // Terminal note "G.W. kg" → Per KG on gross weight (Excel col E), not C.W.
+    name: 'CASE F — Terminal on G.W. (note override)',
+    input: {
+      origin: 'ICN',
+      destination: 'HKG',
+      length: 110,
+      width: 110,
+      height: 150,
+      qty: 3,
+      gross: 400,
+      fx: 1,
+      blCount: 1,
+      _terminalNote: 'G.W. kg, MIN',
+    },
+    expect: {
+      terminalAmount: 672,
+    },
+  },
 ]
 
 let failed = 0
 for (const c of cases) {
   console.log('\n' + '='.repeat(60))
   console.log(c.name)
-  const q = calcCmDeskQuote(master, c.input)
+  const { _terminalNote, ...input } = c.input
+  const caseMaster = _terminalNote
+    ? structuredClone(master)
+    : master
+  if (_terminalNote) {
+    const term = caseMaster.local.find((l) => l.item.includes('Terminal'))
+    if (term) term.note = _terminalNote
+  }
+  const q = calcCmDeskQuote(caseMaster, input)
   if (!q) {
     console.log('FAIL: no quote (route missing?)')
     failed++
@@ -121,7 +175,7 @@ for (const c of cases) {
   }
   const airLine = q.lines.find((l) => l.id === 'air')
   const truckingLine = q.lines.find((l) => l.id === 'trucking')
-  const picked = pickWeightBreak(q.cw, master.breaks)
+  const terminalLine = q.lines.find((l) => l.id === 'terminal')
 
   console.log({
     cbm: q.cbm.toFixed(4),
@@ -132,6 +186,8 @@ for (const c of cases) {
     airMin: q.airMin,
     airAmount: airLine?.amount,
     truckingAmount: truckingLine?.amount,
+    terminalAmount: terminalLine?.amount,
+    allInPerKg: q.allInPerKg,
     currency: q.currency,
     total: q.total.toFixed(2),
   })
@@ -162,6 +218,17 @@ for (const c of cases) {
     const amt = truckingLine?.amount ?? 0
     const ok = amt >= c.expect.truckingMin - 0.01
     checks.push(`Trucking ${amt} ≥ MIN ${c.expect.truckingMin} → ${ok ? 'OK' : 'FAIL'}`)
+    if (!ok) failed++
+  }
+  if (c.expect.terminalAmount != null) {
+    const amt = terminalLine?.amount ?? 0
+    const ok = Math.abs(amt - c.expect.terminalAmount) < 0.05
+    checks.push(`Terminal ${amt.toFixed(2)} ≈ ${c.expect.terminalAmount} → ${ok ? 'OK' : 'FAIL'}`)
+    if (!ok) failed++
+  }
+  if (c.expect.total != null) {
+    const ok = Math.abs(q.total - c.expect.total) < 0.05
+    checks.push(`TOTAL ${q.total.toFixed(2)} ≈ ${c.expect.total} → ${ok ? 'OK' : 'FAIL'}`)
     if (!ok) failed++
   }
   checks.forEach((line) => console.log(' ', line))

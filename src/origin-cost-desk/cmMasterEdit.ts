@@ -73,6 +73,7 @@ export function addLocalCharge(master: CmMaster, row?: Partial<CmLocalRate>): Cm
     unit: row?.unit?.trim() || 'Manual',
     rate: row?.rate ?? 0,
     min: row?.min ?? 0,
+    note: row?.note?.trim() || undefined,
   })
   return next
 }

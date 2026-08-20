@@ -193,6 +193,303 @@ body {
   animation: step-progress 4.5s linear forwards;
 }
 
+/* Origin Cost Desk — professional quotation workbench */
+.desk-shell {
+  min-height: 100%;
+  background: #f4f6f8;
+  color: #1a2a3a;
+}
+
+.desk-topbar {
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
+  box-shadow: 0 1px 0 rgba(26, 42, 58, 0.04);
+}
+
+.desk-nav {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid #e2e8f0;
+  background: #fff;
+}
+
+.desk-nav-tab {
+  padding: 0.7rem 1.35rem;
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.desk-nav-tab:hover {
+  color: #1a2a3a;
+}
+
+.desk-nav-tab.is-active {
+  color: #1a2a3a;
+  border-bottom-color: #f05023;
+}
+
+.desk-status-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.desk-status-label {
+  color: #94a3b8;
+  font-weight: 500;
+  font-size: 11px;
+}
+
+.desk-status-value {
+  color: #1a2a3a;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.desk-status-value.accent {
+  color: #1a2a3a;
+}
+
+.desk-status-value.total {
+  color: #f05023;
+  font-size: 14px;
+}
+
+.desk-panel {
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.desk-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.65rem 1rem;
+  background: #fff;
+  border-bottom: 1px solid #eef2f6;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1a2a3a;
+}
+
+.desk-section-title {
+  padding: 0.45rem 0.85rem;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  background: #1a2a3a;
+  letter-spacing: 0.01em;
+}
+
+.desk-label {
+  background: #f7f9fb;
+  color: #64748b;
+  font-weight: 600;
+  font-size: 12px;
+  padding: 0.5rem 0.7rem;
+  text-align: left;
+  border: 1px solid #eef2f6;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+/* Soft amber wash — readable, not a yellow flood */
+.desk-editable {
+  background: #fff8e7;
+  border: 1px solid #f1e4c4;
+  padding: 0.25rem 0.4rem;
+  vertical-align: middle;
+}
+
+.desk-readonly {
+  background: #fafbfc;
+  border: 1px solid #eef2f6;
+  padding: 0.45rem 0.7rem;
+  font-weight: 600;
+  color: #334155;
+  vertical-align: middle;
+}
+
+.desk-computed {
+  background: #f7f9fb;
+  border: 1px solid #e2e8f0;
+  color: #1a2a3a;
+  font-weight: 700;
+  padding: 0.45rem 0.7rem;
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+
+.desk-input {
+  width: 100%;
+  height: 2rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  padding: 0 0.55rem;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.desk-editable .desk-input {
+  background: #fffefb;
+  border-color: #ead9a8;
+}
+
+.desk-input:focus {
+  border-color: #f05023;
+  box-shadow: 0 0 0 2px rgba(240, 80, 35, 0.15);
+}
+
+.desk-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 2rem;
+  padding: 0 0.85rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.desk-btn:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.desk-btn-primary {
+  background: #1a2a3a;
+  border-color: #1a2a3a;
+  color: #fff;
+}
+
+.desk-btn-primary:hover {
+  background: #243447;
+  border-color: #243447;
+}
+
+.desk-btn-accent {
+  background: #f05023;
+  border-color: #f05023;
+  color: #fff;
+}
+
+.desk-btn-accent:hover {
+  background: #d6451c;
+  border-color: #d6451c;
+}
+
+.desk-master-wrap {
+  /* Horizontal only when many break columns — no nested vertical scroll */
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.desk-master-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: max-content;
+  min-width: 100%;
+  font-size: 12.5px;
+}
+
+.desk-master-table th,
+.desk-master-table td {
+  border-bottom: 1px solid #eef2f6;
+  border-right: 1px solid #eef2f6;
+  padding: 0.35rem 0.45rem;
+  vertical-align: middle;
+  overflow: hidden;
+}
+
+.desk-master-table thead th {
+  background: #f7f9fb;
+  color: #475569;
+  font-weight: 700;
+  font-size: 11px;
+  white-space: nowrap;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.desk-master-table .col-route {
+  background: #fff;
+  min-width: 96px;
+  max-width: 120px;
+}
+
+.desk-master-table thead .col-route {
+  background: #f7f9fb;
+}
+
+.desk-master-table tbody tr:hover td {
+  background: #fafbfc;
+}
+
+.desk-master-table tbody tr:hover .col-route {
+  background: #fafbfc;
+}
+
+.desk-master-input {
+  width: 100%;
+  height: 1.85rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
+  background: #fff;
+  padding: 0 0.4rem;
+  font-size: 12.5px;
+}
+
+.desk-master-input.is-editable {
+  background: #fff8e7;
+  border-color: #ead9a8;
+}
+
+.desk-master-input:focus {
+  border-color: #f05023;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(240, 80, 35, 0.12);
+}
+
+.desk-master-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.85rem;
+  padding: 0.55rem 1rem;
+  background: #fafbfc;
+  border-bottom: 1px solid #eef2f6;
+  font-size: 12px;
+}
+
+.desk-total-bar {
+  background: #1a2a3a;
+  color: #fff;
+}
+
+.desk-total-bar .amount {
+  color: #ff8f66;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hero-pan,
   .hero-glow,

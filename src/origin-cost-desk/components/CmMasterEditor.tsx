@@ -1,5 +1,9 @@
 import { Plus, Trash2 } from 'lucide-react'
-import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import {
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react'
 import type { CmAirRate, CmMaster } from '../cmExcelMaster'
 import { breakThresholdHint } from '../cmExcelMaster'
 import {
@@ -13,6 +17,7 @@ import {
   removeLocalCharge,
   removeWeightBreak,
 } from '../cmMasterEdit'
+import { DraftTextInput } from './DraftTextInput'
 
 export function NumericCell({
   value,
@@ -27,24 +32,36 @@ export function NumericCell({
   inputRef?: (el: HTMLInputElement | null) => void
   className?: string
 }) {
-  const [focused, setFocused] = useState(false)
+  const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
-  const shown = focused ? draft : Number.isFinite(value) ? String(value) : ''
+  const draftRef = useRef('')
+  const shown = editing
+    ? draft
+    : Number.isFinite(value)
+      ? String(value)
+      : ''
+
   return (
     <input
       ref={inputRef}
       type="text"
+      inputMode="decimal"
       value={shown}
       onFocus={() => {
-        setFocused(true)
-        setDraft(Number.isFinite(value) ? String(value) : '')
+        const initial = Number.isFinite(value) ? String(value) : ''
+        draftRef.current = initial
+        setDraft(initial)
+        setEditing(true)
       }}
       onBlur={() => {
-        setFocused(false)
-        const n = Number(draft.trim())
+        setEditing(false)
+        const n = Number(draftRef.current.trim())
         if (Number.isFinite(n)) onCommit(n)
       }}
-      onChange={(e) => setDraft(e.target.value)}
+      onChange={(e) => {
+        draftRef.current = e.target.value
+        setDraft(e.target.value)
+      }}
       onKeyDown={onKeyDown}
       className={className}
     />
@@ -130,33 +147,27 @@ export function CmMasterEditor({ master, onChange }: Props) {
     onChange(next)
   }
 
+  const editableInput = 'desk-master-input is-editable'
+  const plainInput = 'desk-master-input'
+
   return (
     <div className="space-y-4">
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-3 px-4 pt-4">
-          <div>
-            <p className="text-[10px] font-bold tracking-wider text-wac-navy uppercase">
-              Air routes (Master_DB)
-            </p>
-            <p className="mt-1 max-w-2xl text-[11px] leading-relaxed text-slate-500">
-              <strong>-45</strong> = under the next tier (GCR: under 45 kg). It uses{' '}
-              <strong>from kg 0</strong> because the engine picks the highest tier where C.W.
-              ≥ threshold. One column only → FLAT (same rate for all weights).
-            </p>
-          </div>
+      <div className="desk-panel">
+        <div className="desk-panel-head">
+          <span>Air routes</span>
           <button
             type="button"
             onClick={() => onChange(addAirRoute(master))}
-            className="inline-flex items-center gap-1 text-[10px] font-bold text-wac-orange uppercase hover:underline"
+            className="desk-btn gap-1"
           >
-            <Plus className="h-3 w-3" />
+            <Plus className="h-3.5 w-3.5" />
             Add route
           </button>
         </div>
 
-        <div className="mx-4 mt-3 flex flex-wrap items-end gap-2 rounded-xl bg-slate-50 px-3 py-2">
-          <label className="text-[10px] font-bold tracking-wider text-slate-500 uppercase">
-            From (kg)
+        <div className="desk-master-toolbar">
+          <label className="text-slate-600">
+            <span className="mr-1 font-semibold">Break from (kg)</span>
             <input
               type="text"
               value={newBreakKg}
@@ -168,75 +179,76 @@ export function CmMasterEditor({ master, onChange }: Props) {
                 }
               }}
               placeholder="300"
-              className="mt-1 block h-8 w-24 rounded border border-slate-200 bg-white px-2 text-[11px] font-bold outline-none focus:border-wac-orange"
+              className="desk-master-input ml-1 inline-block w-20"
             />
           </label>
-          <button
-            type="button"
-            onClick={addBreakFromDraft}
-            className="inline-flex h-8 items-center gap-1 rounded-lg bg-wac-navy px-3 text-[10px] font-bold text-white uppercase"
-          >
-            <Plus className="h-3 w-3" />
+          <button type="button" onClick={addBreakFromDraft} className="desk-btn desk-btn-primary gap-1">
+            <Plus className="h-3.5 w-3.5" />
             Add break
           </button>
           {breakNotice ? (
-            <p className="text-[10px] font-semibold text-amber-700">{breakNotice}</p>
+            <p className="text-[11px] font-semibold text-amber-700">{breakNotice}</p>
           ) : null}
+          <p className="ml-auto text-[11px] text-slate-400">
+            Amber cells are editable · saved on this PC
+          </p>
         </div>
 
-        <div className="mt-3 overflow-x-auto border-t border-slate-100">
-          <table className="w-full min-w-[820px] text-left text-[11px]">
+        <div className="desk-master-wrap">
+          <table className="desk-master-table">
             <thead>
-              <tr className="bg-[#1A2A3A] text-[9px] font-bold uppercase tracking-wider text-white/80">
-                <th className="px-2 py-2 align-bottom">Route</th>
-                <th className="px-2 py-2 align-bottom">MIN</th>
+              <tr>
+                <th className="col-route" rowSpan={2}>Route</th>
+                <th rowSpan={2}>MIN</th>
+                {master.breaks.map((br) => (
+                  <th key={br.id} className="min-w-[72px] text-center">
+                    {br.label}
+                  </th>
+                ))}
+                <th rowSpan={2}>FSC</th>
+                <th rowSpan={2}>SSC</th>
+                <th rowSpan={2}>CUR</th>
+                <th rowSpan={2} className="w-8" />
+              </tr>
+              <tr>
                 {master.breaks.map((br, bi) => (
-                  <th key={br.id} className="min-w-[88px] px-2 py-2">
-                    <p className="mb-1 text-center text-[11px] font-bold uppercase text-white">
-                      {br.label}
-                    </p>
-                    <div className="flex items-center gap-1">
+                  <th key={`${br.id}-kg`} className="min-w-[72px]">
+                    <div className="flex items-center gap-0.5">
                       <NumericCell
                         value={br.minKg}
                         onCommit={(n) =>
                           onChange(patchWeightBreak(master, bi, { minKg: n }))
                         }
-                        className="h-6 w-full rounded border border-white/20 bg-white/10 px-1 text-center text-[10px] text-white outline-none focus:border-wac-orange"
+                        className={`${editableInput} text-center`}
                       />
                       <button
                         type="button"
                         onClick={() => onChange(removeWeightBreak(master, bi))}
                         disabled={master.breaks.length <= 1}
-                        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-white/70 hover:text-red-300 disabled:opacity-30"
+                        className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-slate-400 hover:text-red-500 disabled:opacity-30"
                         aria-label={`Remove ${br.label}`}
                       >
                         <Trash2 className="h-3 w-3" />
                       </button>
                     </div>
-                    <p className="mt-0.5 text-center text-[8px] font-semibold normal-case tracking-normal text-white/50">
+                    <p className="mt-0.5 text-center text-[9px] font-normal text-slate-500">
                       {breakThresholdHint(br, master.breaks)}
                     </p>
                   </th>
                 ))}
-                <th className="px-2 py-2 align-bottom">FSC</th>
-                <th className="px-2 py-2 align-bottom">SSC</th>
-                <th className="min-w-[78px] px-2 py-2 align-bottom">CUR</th>
-                <th className="w-8 px-1 py-2" />
               </tr>
             </thead>
             <tbody>
               {master.air.map((row, i) => (
-                <tr key={`${row.route}-${i}`} className="border-t border-slate-100 odd:bg-white even:bg-slate-50/50">
-                  <td className="px-2 py-1.5">
-                    <input
-                      ref={(el) => {
+                <tr key={`${row.route}-${i}`}>
+                  <td className="col-route">
+                    <DraftTextInput
+                      inputRef={(el) => {
                         cellRefs.current[`air-${i}-route`] = el
                       }}
-                      type="text"
                       value={row.route}
-                      onChange={(e) =>
-                        patchAir(i, { route: e.target.value.toUpperCase() })
-                      }
+                      normalize={(v) => v.toUpperCase().replace(/[^A-Z0-9-]/g, '')}
+                      onCommit={(route) => patchAir(i, { route })}
                       onKeyDown={(e) =>
                         handleNav(e, {
                           enter: `air-${i + 1 < master.air.length ? i + 1 : 0}-route`,
@@ -244,10 +256,10 @@ export function CmMasterEditor({ master, onChange }: Props) {
                           right: `air-${i}-min`,
                         })
                       }
-                      className="h-8 w-full min-w-[80px] rounded border border-yellow-100 bg-yellow-50 px-1.5 text-[11px] font-bold uppercase outline-none focus:border-wac-orange"
+                      className={`${editableInput} font-bold uppercase`}
                     />
                   </td>
-                  <td className="px-2 py-1.5">
+                  <td>
                     <NumericCell
                       inputRef={(el) => {
                         cellRefs.current[`air-${i}-min`] = el
@@ -263,11 +275,11 @@ export function CmMasterEditor({ master, onChange }: Props) {
                           right: rateCellId(i, 0),
                         })
                       }
-                      className="h-8 w-full min-w-[52px] rounded border border-yellow-100 bg-yellow-50 px-1.5 text-[11px] font-medium outline-none focus:border-wac-orange"
+                      className={`${editableInput} text-right`}
                     />
                   </td>
                   {master.breaks.map((br, bi) => (
-                    <td key={br.id} className="px-2 py-1.5">
+                    <td key={br.id}>
                       <NumericCell
                         inputRef={(el) => {
                           cellRefs.current[rateCellId(i, bi)] = el
@@ -302,11 +314,11 @@ export function CmMasterEditor({ master, onChange }: Props) {
                                 : rateCellId(i, bi + 1),
                           })
                         }
-                        className="h-8 w-full min-w-[52px] rounded border border-yellow-100 bg-yellow-50 px-1.5 text-[11px] font-medium outline-none focus:border-wac-orange"
+                        className={`${editableInput} text-right`}
                       />
                     </td>
                   ))}
-                  <td className="px-2 py-1.5">
+                  <td>
                     <NumericCell
                       inputRef={(el) => {
                         cellRefs.current[`air-${i}-fsc`] = el
@@ -322,10 +334,10 @@ export function CmMasterEditor({ master, onChange }: Props) {
                           right: `air-${i}-ssc`,
                         })
                       }
-                      className="h-8 w-full min-w-[52px] rounded border border-yellow-100 bg-yellow-50 px-1.5 text-[11px] font-medium outline-none focus:border-wac-orange"
+                      className={`${editableInput} text-right`}
                     />
                   </td>
-                  <td className="px-2 py-1.5">
+                  <td>
                     <NumericCell
                       inputRef={(el) => {
                         cellRefs.current[`air-${i}-ssc`] = el
@@ -341,10 +353,10 @@ export function CmMasterEditor({ master, onChange }: Props) {
                           right: `air-${i}-currency`,
                         })
                       }
-                      className="h-8 w-full min-w-[52px] rounded border border-yellow-100 bg-yellow-50 px-1.5 text-[11px] font-medium outline-none focus:border-wac-orange"
+                      className={`${editableInput} text-right`}
                     />
                   </td>
-                  <td className="min-w-[78px] px-2 py-1.5">
+                  <td>
                     <select
                       ref={(el) => {
                         cellRefs.current[`air-${i}-currency`] = el
@@ -363,17 +375,17 @@ export function CmMasterEditor({ master, onChange }: Props) {
                           left: `air-${i}-ssc`,
                         })
                       }
-                      className="h-8 w-full rounded border border-slate-200 bg-white px-1 text-[11px] font-bold outline-none focus:border-wac-orange"
+                      className={`${plainInput} font-semibold`}
                     >
                       <option value="USD">USD</option>
                       <option value="HKD">HKD</option>
                     </select>
                   </td>
-                  <td className="px-1 py-1.5">
+                  <td>
                     <button
                       type="button"
                       onClick={() => onChange(removeAirRoute(master, i))}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded border border-slate-200 text-slate-400 hover:border-red-300 hover:text-red-500"
+                      className="inline-flex h-7 w-7 items-center justify-center border border-slate-200 text-slate-400 hover:border-red-300 hover:text-red-500"
                       aria-label="Remove route"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -386,35 +398,34 @@ export function CmMasterEditor({ master, onChange }: Props) {
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <p className="px-4 pt-4 text-[10px] font-bold tracking-wider text-wac-navy uppercase">
-            Local charges (Master_DB)
-          </p>
+      <div className="desk-panel">
+        <div className="desk-panel-head">
+          <span>Local charges</span>
           <button
             type="button"
             onClick={() => onChange(addLocalCharge(master))}
-            className="mr-4 inline-flex items-center gap-1 text-[10px] font-bold text-wac-orange uppercase hover:underline"
+            className="desk-btn gap-1"
           >
-            <Plus className="h-3 w-3" />
+            <Plus className="h-3.5 w-3.5" />
             Add line
           </button>
         </div>
-        <div className="overflow-x-auto border-t border-slate-100">
-          <table className="w-full min-w-[520px] text-left text-[11px]">
+        <div className="desk-master-wrap">
+          <table className="desk-master-table min-w-[520px]">
             <thead>
-              <tr className="bg-[#1A2A3A] text-[9px] font-bold uppercase tracking-wider text-white/80">
-                <th className="px-2 py-2">Charge item</th>
-                <th className="px-2 py-2">Unit</th>
-                <th className="px-2 py-2">Rate</th>
-                <th className="px-2 py-2">MIN</th>
-                <th className="w-8 px-1 py-2" />
+              <tr>
+                <th>Charge item</th>
+                <th>Unit</th>
+                <th>Rate</th>
+                <th>MIN</th>
+                <th>Note</th>
+                <th className="w-8" />
               </tr>
             </thead>
             <tbody>
               {master.local.map((row, i) => (
-                <tr key={`${row.item}-${i}`} className="border-t border-slate-100 odd:bg-white even:bg-slate-50/50">
-                  <td className="px-2 py-1.5">
+                <tr key={`${row.item}-${i}`}>
+                  <td>
                     <input
                       ref={(el) => {
                         cellRefs.current[`local-${i}-item`] = el
@@ -429,10 +440,10 @@ export function CmMasterEditor({ master, onChange }: Props) {
                           right: `local-${i}-unit`,
                         })
                       }
-                      className="h-8 w-full min-w-[120px] rounded border border-yellow-100 bg-yellow-50 px-1.5 text-[11px] font-semibold outline-none focus:border-wac-orange"
+                      className={`${editableInput} font-semibold`}
                     />
                   </td>
-                  <td className="px-2 py-1.5">
+                  <td>
                     <input
                       ref={(el) => {
                         cellRefs.current[`local-${i}-unit`] = el
@@ -449,10 +460,10 @@ export function CmMasterEditor({ master, onChange }: Props) {
                           right: `local-${i}-rate`,
                         })
                       }
-                      className="h-8 w-full min-w-[80px] rounded border border-slate-200 px-1.5 text-[11px] outline-none focus:border-wac-orange"
+                      className={plainInput}
                     />
                   </td>
-                  <td className="px-2 py-1.5">
+                  <td>
                     <NumericCell
                       inputRef={(el) => {
                         cellRefs.current[`local-${i}-rate`] = el
@@ -468,10 +479,10 @@ export function CmMasterEditor({ master, onChange }: Props) {
                           right: `local-${i}-min`,
                         })
                       }
-                      className="h-8 w-full min-w-[52px] rounded border border-yellow-100 bg-yellow-50 px-1.5 text-[11px] font-medium outline-none focus:border-wac-orange"
+                      className={`${editableInput} text-right`}
                     />
                   </td>
-                  <td className="px-2 py-1.5">
+                  <td>
                     <NumericCell
                       inputRef={(el) => {
                         cellRefs.current[`local-${i}-min`] = el
@@ -486,14 +497,28 @@ export function CmMasterEditor({ master, onChange }: Props) {
                           left: `local-${i}-rate`,
                         })
                       }
-                      className="h-8 w-full min-w-[52px] rounded border border-yellow-100 bg-yellow-50 px-1.5 text-[11px] font-medium outline-none focus:border-wac-orange"
+                      className={`${editableInput} text-right`}
                     />
                   </td>
-                  <td className="px-1 py-1.5">
+                  <td>
+                    <input
+                      type="text"
+                      value={row.note ?? ''}
+                      placeholder="C.W. kg"
+                      onChange={(e) =>
+                        patchLocal(i, {
+                          note: e.target.value.trim() || undefined,
+                        })
+                      }
+                      className={`${plainInput} min-w-[88px] text-[11px] text-slate-500`}
+                      title="Per KG basis: C.W. kg (default) or G.W. kg"
+                    />
+                  </td>
+                  <td>
                     <button
                       type="button"
                       onClick={() => onChange(removeLocalCharge(master, i))}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded border border-slate-200 text-slate-400 hover:border-red-300 hover:text-red-500"
+                      className="inline-flex h-7 w-7 items-center justify-center border border-slate-200 text-slate-400 hover:border-red-300 hover:text-red-500"
                       aria-label="Remove charge"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -505,11 +530,6 @@ export function CmMasterEditor({ master, onChange }: Props) {
           </table>
         </div>
       </div>
-
-      <p className="text-[10px] leading-relaxed text-slate-500">
-        Yellow cells save automatically in this browser (local + cloud). Excel file is
-        only the first-load default. Use Import Master_DB to load a file from disk.
-      </p>
     </div>
   )
 }

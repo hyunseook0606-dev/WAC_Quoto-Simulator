@@ -195,7 +195,7 @@ export function buildCmDeskQuotationHtml(opts: {
   </div>
   <div class="accent"></div>
   <h1>AIR FREIGHT QUOTATION</h1>
-  <div class="sub">Approximate quote · Not a final invoice</div>
+  <div class="sub">Subject to confirmation</div>
   <table class="meta">
     <tr>
       ${consignee.trim() ? `<th>Consignee</th><td>${esc(consignee)}</td>` : `<th>Route</th><td>${esc(origin)} → ${esc(destination)}</td>`}
@@ -213,6 +213,10 @@ export function buildCmDeskQuotationHtml(opts: {
       <td><b>${quote.cw.toFixed(2)} kg</b> · ${quote.cbm.toFixed(3)} CBM · ${esc(quote.breakLabel)}</td>
       ${consignee.trim() ? `<th>Carrier</th><td>${esc(carrierCode)}</td>` : `<th>Lane</th><td>${esc(quote.route)}</td>`}
     </tr>
+    <tr>
+      <th>ALL-IN /kg</th>
+      <td colspan="3"><b>${cur} ${quote.allInPerKg.toFixed(2)}/kg</b> · ${esc(quote.breakLabel)} (Air ${quote.airRate.toFixed(2)} + FSC ${quote.fscPerKg.toFixed(2)} + SSC ${quote.sscPerKg.toFixed(2)}) · on C.W.</td>
+    </tr>
     ${remark.trim() ? `<tr><th>Remark</th><td colspan="3">${esc(remark)}</td></tr>` : ''}
   </table>
   ${cargoTable}
@@ -226,7 +230,7 @@ export function buildCmDeskQuotationHtml(opts: {
       </tr>
     </tbody>
   </table>
-  <div class="foot">This quotation is indicative and subject to confirmation.</div>
+  <div class="foot">Rates and charges are subject to confirmation.</div>
   </div>
 </body>
 </html>`

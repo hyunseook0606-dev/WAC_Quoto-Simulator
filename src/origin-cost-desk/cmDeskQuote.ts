@@ -41,6 +41,8 @@ export type CmDeskQuoteResult = {
   qty: number
   breakLabel: string
   airRate: number
+  /** Air rate + FSC/kg + SSC/kg at applied break (desk ALL-IN reference) */
+  allInPerKg: number
   currency: 'USD' | 'HKD'
   fx: number
   lines: CmDeskLine[]
@@ -86,7 +88,7 @@ export function localLineId(item: string): string {
     .replace(/^-|-$/g, '')}`
 }
 
-function useAmount(
+function resolveAmount(
   key: string,
   computed: number,
   exceptions: Record<string, number | null | undefined>,
@@ -125,15 +127,30 @@ function line(
   }
 }
 
+/** kg basis for Per KG locals — Excel note "C.W." vs "G.W." (bundled default: C.W.) */
+export function localPerKgBasis(
+  item: Pick<CmLocalRate, 'unit' | 'note'>,
+): 'cw' | 'gross' {
+  const blob = `${item.unit} ${item.note ?? ''}`.toUpperCase()
+  if (/C\.?\s*W|CHARGEABLE/.test(blob)) return 'cw'
+  if (/G\.?\s*W|GROSS|\bGW\b/.test(blob)) return 'gross'
+  return 'cw'
+}
+
+export function calcAllInPerKg(airRate: number, fscPerKg: number, sscPerKg: number): number {
+  return airRate + fscPerKg + sscPerKg
+}
+
 /** Master local 참고(I): unit 기준으로 Excel 입력 시트와 같은 과금 */
 export function localMasterRef(
   item: CmLocalRate,
-  ctx: { cw: number; cbm: number; bl: number; qty: number },
+  ctx: { cw: number; gross: number; cbm: number; bl: number; qty: number },
 ): number {
   const unit = item.unit.toUpperCase()
   if (unit.includes('CBM')) return Math.max(item.rate * ctx.cbm, item.min)
   if (unit.includes('KG') || unit.includes('C.W')) {
-    return Math.max(item.rate * ctx.cw, item.min)
+    const basis = localPerKgBasis(item) === 'gross' ? ctx.gross : ctx.cw
+    return Math.max(item.rate * basis, item.min)
   }
   if (unit.includes('BL') || unit.includes('ENTRY')) {
     return Math.max(item.rate, item.min) * ctx.bl
@@ -192,11 +209,11 @@ export function calcCmDeskQuote(
   const breakLabel = picked?.label ?? ''
   const airRate = picked ? rateForBreak(air, master.breaks, picked.id) : 0
   const currency = air.currency ?? 'USD'
-  const ctx = { cw, cbm, bl, qty: totalQty }
+  const ctx = { cw, cbm, bl, qty: totalQty, gross }
 
-  const airAmt = useAmount('air', Math.max(airRate * cw, air.min), exc, refOverrides)
-  const fscAmt = useAmount('fsc', air.fsc * cw, exc, refOverrides)
-  const sscAmt = useAmount('ssc', air.ssc * cw, exc, refOverrides)
+  const airAmt = resolveAmount('air', Math.max(airRate * cw, air.min), exc, refOverrides)
+  const fscAmt = resolveAmount('fsc', air.fsc * cw, exc, refOverrides)
+  const sscAmt = resolveAmount('ssc', air.ssc * cw, exc, refOverrides)
 
   const lines: CmDeskLine[] = [
     line('air', 'Air Freight', 'Per KG', 'air', airAmt.ref, airAmt.override, airAmt.amount, {
@@ -211,7 +228,7 @@ export function calcCmDeskQuote(
     if (disabled.includes(id)) continue
     const unit = units[id]?.trim() || local.unit
     const computed = localMasterRef({ ...local, unit }, ctx)
-    const amt = useAmount(id, computed, exc, refOverrides)
+    const amt = resolveAmount(id, computed, exc, refOverrides)
     lines.push(
       line(id, local.item, unit, 'local', amt.ref, amt.override, amt.amount, {
         // Master_DB 기반 자동 계산 항목은 Input에서 참고/단위 수정하지 않음.
@@ -225,7 +242,7 @@ export function calcCmDeskQuote(
     if (disabled.includes(extra.id)) continue
     const label = labels[extra.id]?.trim() || extra.label.trim() || 'Other'
     const unit = units[extra.id]?.trim() || extra.unit.trim() || 'Manual'
-    const amt = useAmount(extra.id, 0, exc, refOverrides)
+    const amt = resolveAmount(extra.id, 0, exc, refOverrides)
     lines.push(
       line(extra.id, label, unit, 'variable', amt.ref, amt.override, amt.amount, {
         editableLabel: true,
@@ -252,6 +269,7 @@ export function calcCmDeskQuote(
     sscPerKg: air.ssc,
     breakLabel,
     airRate,
+    allInPerKg: calcAllInPerKg(airRate, air.fsc, air.ssc),
     currency,
     fx,
     lines,

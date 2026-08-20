@@ -3,7 +3,7 @@ import { OriginCostDeskSite } from './origin-cost-desk/OriginCostDeskSite'
 
 /**
  * Internal-only SPA:
- * - /origin-cost-desk : Origin Cost Desk (Excel-style desk quotation)
+ * - /origin-cost-desk : Origin Cost Desk
  * All other routes redirect here.
  */
 export default function App() {
