@@ -207,8 +207,8 @@ export function calcCmDeskQuote(
     const amt = useAmount(id, computed, exc, refOverrides)
     lines.push(
       line(id, local.item, unit, 'local', amt.ref, amt.override, amt.amount, {
-        editableUnit: true,
-        editableRef: true,
+        // Master_DB 기반 자동 계산 항목은 Input에서 참고/단위 수정하지 않음.
+        // 예외(J)만 변경 가능하도록 editable flag을 제거한다.
         fromMasterLocal: true,
       }),
     )
