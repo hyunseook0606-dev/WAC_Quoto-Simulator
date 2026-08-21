@@ -99,7 +99,11 @@ http://devops.wactracking.com:34344/origin-cost-desk
 
 Optional: `DEPLOY_PASSWORD` (if no key), `DEPLOY_WEB_PORT` (default `34344`), `DEPLOY_APP_DIR`.
 
-Do **not** commit passwords or private keys. Do **not** paste server passwords into AI tools.
+Do **not** commit passwords or private keys. See **[SECURITY.md](./SECURITY.md)**:
+
+1. Do not let AI agents SSH into the company server.
+2. Do not paste server passwords into AI tools.
+3. Do not store credentials in the GitHub repo (use Actions secrets only).
 
 ### B) Manual SSH on the host
 

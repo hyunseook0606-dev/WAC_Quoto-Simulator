@@ -20,6 +20,17 @@ data/
 /assets/
 /404.html
 
+# Credentials / keys (never commit)
+*.pem
+*.p12
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+*.key
+secrets/
+credentials.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

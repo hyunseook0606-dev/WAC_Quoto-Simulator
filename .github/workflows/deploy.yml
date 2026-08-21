@@ -1,10 +1,15 @@
-# Deploy Origin Cost Desk to company devops via SSH + password secret.
-# URL: http://devops.wactracking.com:34344/origin-cost-desk
+# Deploy Origin Cost Desk via SSH (GitHub Actions).
+# Public app port on host: 34344 (not an SSH secret).
 #
-# Required GitHub Actions secret (only this one must be set):
-#   DEPLOY_PASSWORD = SSH password for userinternship
+# Required secrets (Repo → Settings → Secrets and variables → Actions):
+#   DEPLOY_HOST
+#   DEPLOY_SSH_PORT   (SSH port from Teddy — not 34344)
+#   DEPLOY_USER
+#   DEPLOY_SSH_KEY    (preferred)  OR  DEPLOY_PASSWORD
 #
-# Do not commit the password. Do not paste it into AI tools.
+# Never commit passwords or private keys.
+# Never paste server passwords into AI tools (Cursor, etc.).
+# Never let AI agents SSH into the company server.
 
 name: Deploy devops
 
@@ -22,20 +27,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Check password secret is set
+      - name: Check deploy secrets
         run: |
-          if [ -z "${{ secrets.DEPLOY_PASSWORD }}" ]; then
-            echo "Missing secret DEPLOY_PASSWORD. Add it in Repo Settings → Secrets → Actions."
-            exit 1
+          missing=0
+          [ -z "${{ secrets.DEPLOY_HOST }}" ] && echo "Missing DEPLOY_HOST" && missing=1
+          [ -z "${{ secrets.DEPLOY_SSH_PORT }}" ] && echo "Missing DEPLOY_SSH_PORT" && missing=1
+          [ -z "${{ secrets.DEPLOY_USER }}" ] && echo "Missing DEPLOY_USER" && missing=1
+          if [ -z "${{ secrets.DEPLOY_SSH_KEY }}" ] && [ -z "${{ secrets.DEPLOY_PASSWORD }}" ]; then
+            echo "Missing auth: set DEPLOY_SSH_KEY (preferred) or DEPLOY_PASSWORD"
+            missing=1
           fi
-          echo "DEPLOY_PASSWORD is set (value hidden)."
+          [ "$missing" = "1" ] && exit 1
+          echo "Deploy secrets present (values hidden)."
 
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
-          host: devops.wactracking.com
-          username: userinternship
-          port: 34343
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          port: ${{ secrets.DEPLOY_SSH_PORT }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
           password: ${{ secrets.DEPLOY_PASSWORD }}
           script_stop: true
           command_timeout: 25m

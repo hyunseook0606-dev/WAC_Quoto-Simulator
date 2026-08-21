@@ -35,3 +35,4 @@ npm run dev       # proxies /api
 - Verify: `npm run verify:cases`
 - Do not commit `.env` or Excel lock files (`~$*`).
 - Logos: `public/wac-logo.png`, `public/wac-mark-hero.png`.
+- **Security (company devops):** Never SSH into devops from the agent. Never ask for or use server passwords in chat. Never commit credentials. See `SECURITY.md`. Deploy only via GitHub Actions secrets or the human's own terminal.
