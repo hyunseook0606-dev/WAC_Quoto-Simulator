@@ -65,6 +65,11 @@ stop_old_server() {
     kill "$(cat "${HOME}/wac-desk-serve.pid")" 2>/dev/null || true
     rm -f "${HOME}/wac-desk-serve.pid"
   fi
+  # Vite/dev servers cause /src/main.tsx + octet-stream MIME errors in the browser
+  pkill -f "vite --port ${WEB_PORT}" 2>/dev/null || true
+  pkill -f "node_modules/.bin/vite" 2>/dev/null || true
+  pkill -f "node_modules/.bin/serve" 2>/dev/null || true
+  pkill -f "serve -s dist" 2>/dev/null || true
   if command -v fuser >/dev/null 2>&1; then
     fuser -k "${WEB_PORT}/tcp" 2>/dev/null || true
   fi

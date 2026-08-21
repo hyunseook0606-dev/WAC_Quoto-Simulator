@@ -86,15 +86,23 @@ function contentType(filePath) {
     {
       '.html': 'text/html; charset=utf-8',
       '.js': 'text/javascript; charset=utf-8',
+      '.mjs': 'text/javascript; charset=utf-8',
+      '.cjs': 'text/javascript; charset=utf-8',
       '.css': 'text/css; charset=utf-8',
       '.json': 'application/json; charset=utf-8',
+      '.map': 'application/json; charset=utf-8',
       '.png': 'image/png',
       '.jpg': 'image/jpeg',
       '.jpeg': 'image/jpeg',
       '.svg': 'image/svg+xml',
       '.ico': 'image/x-icon',
-      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      '.xlsx':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      '.woff': 'font/woff',
       '.woff2': 'font/woff2',
+      // Never treat TS sources as browser modules in production.
+      '.ts': 'text/plain; charset=utf-8',
+      '.tsx': 'text/plain; charset=utf-8',
     }[ext] || 'application/octet-stream'
   )
 }
@@ -106,6 +114,12 @@ function serveStatic(req, res, urlPath) {
     return
   }
   let rel = decodeURIComponent(urlPath.split('?')[0])
+  // Block Vite source entry — production must use dist/assets/*.js
+  if (rel.startsWith('/src/')) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+    res.end('Source files are not served in production. Use npm run build + deskServer.')
+    return
+  }
   if (rel === '/' || rel === '') rel = '/index.html'
   const safe = path.normalize(rel).replace(/^(\.\.[/\\])+/, '')
   let filePath = path.join(DIST, safe)
@@ -121,7 +135,11 @@ function serveStatic(req, res, urlPath) {
     res.writeHead(404).end('Not found')
     return
   }
-  res.writeHead(200, { 'Content-Type': contentType(filePath) })
+  const type = contentType(filePath)
+  res.writeHead(200, {
+    'Content-Type': type,
+    'X-Content-Type-Options': 'nosniff',
+  })
   fs.createReadStream(filePath).pipe(res)
 }
 
