@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Run on the devops host after SSH login.
+# Run on the devops host after SSH login, or from GitHub Actions over SSH.
 # Requires: git. Installs Node via nvm in $HOME if missing (no sudo).
 # Serves UI + shared history API via server/deskServer.mjs
 #
 # Optional env:
-#   PORT=8080
+#   PORT=34344          # public desk port (Teddy test env). Default 8080.
 #   APP_DIR=~/WAC_Quoto-Simulator
 #   REPO=https://github.com/hyunseook0606-dev/WAC_Quoto-Simulator.git
 #
@@ -15,6 +15,8 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-${HOME}/WAC_Quoto-Simulator}"
 REPO="${REPO:-https://github.com/hyunseook0606-dev/WAC_Quoto-Simulator.git}"
 WEB_PORT="${PORT:-8080}"
+PID_FILE="${HOME}/wac-desk-serve-${WEB_PORT}.pid"
+LOG_FILE="${HOME}/wac-desk-serve-${WEB_PORT}.log"
 export NVM_DIR="${HOME}/.nvm"
 export PORT="${WEB_PORT}"
 export APP_DIR REPO
@@ -53,13 +55,16 @@ sync_repo() {
 }
 
 stop_old_server() {
-  if [ -f "${HOME}/wac-desk-serve.pid" ]; then
+  # Only stop the instance for this PORT (do not kill other ports).
+  if [ -f "${PID_FILE}" ]; then
+    kill "$(cat "${PID_FILE}")" 2>/dev/null || true
+    rm -f "${PID_FILE}"
+  fi
+  # Legacy single pid file (older deploys on 8080)
+  if [ "${WEB_PORT}" = "8080" ] && [ -f "${HOME}/wac-desk-serve.pid" ]; then
     kill "$(cat "${HOME}/wac-desk-serve.pid")" 2>/dev/null || true
     rm -f "${HOME}/wac-desk-serve.pid"
   fi
-  pkill -f "node_modules/.bin/serve" 2>/dev/null || true
-  pkill -f "serve -s dist" 2>/dev/null || true
-  pkill -f "server/deskServer.mjs" 2>/dev/null || true
   if command -v fuser >/dev/null 2>&1; then
     fuser -k "${WEB_PORT}/tcp" 2>/dev/null || true
   fi
@@ -73,12 +78,12 @@ start_desk_server() {
     export PORT='"${WEB_PORT}"'
     cd "'"${APP_DIR}"'"
     while true; do
-      node server/deskServer.mjs >> "$HOME/wac-desk-serve.log" 2>&1
-      echo "$(date) deskServer exited, restarting..." >> "$HOME/wac-desk-serve.log"
+      node server/deskServer.mjs >> "'"${LOG_FILE}"'" 2>&1
+      echo "$(date) deskServer exited, restarting..." >> "'"${LOG_FILE}"'"
       sleep 2
     done
   ' >/dev/null 2>&1 &
-  echo $! > "${HOME}/wac-desk-serve.pid"
+  echo $! > "${PID_FILE}"
   sleep 2
 }
 
@@ -92,10 +97,10 @@ build_and_serve() {
   stop_old_server
   start_desk_server
   echo "==> Serving UI + shared history API on 0.0.0.0:${WEB_PORT}"
-  echo "    On host:  http://127.0.0.1:${WEB_PORT}/origin-cost-desk"
-  echo "    History:  http://127.0.0.1:${WEB_PORT}/api/history"
-  echo "    Store:    ${APP_DIR}/data/shared-history.json"
-  echo "    If the public port is closed, SSH-tunnel ${WEB_PORT} to your laptop and open localhost."
+  echo "    Public (if open): http://devops.wactracking.com:${WEB_PORT}/origin-cost-desk"
+  echo "    On host:          http://127.0.0.1:${WEB_PORT}/origin-cost-desk"
+  echo "    History:          http://127.0.0.1:${WEB_PORT}/api/history"
+  echo "    Store:            ${APP_DIR}/data/shared-history.json"
   echo "    Master rates remain per-browser (localStorage)."
 }
 

@@ -1,0 +1,64 @@
+# Deploy Origin Cost Desk to company devops host via SSH.
+# Target URL (Teddy env): http://devops.wactracking.com:34344/origin-cost-desk
+#
+# Required GitHub Actions secrets (Settings → Secrets and variables → Actions):
+#   DEPLOY_HOST      e.g. devops.wactracking.com
+#   DEPLOY_SSH_PORT  SSH port from Teddy (not the web port 34344)
+#   DEPLOY_USER      SSH username
+#   DEPLOY_SSH_KEY   private key (preferred). Do NOT commit this.
+#
+# Optional:
+#   DEPLOY_PASSWORD  only if you cannot use a key (less preferred)
+#   DEPLOY_APP_DIR   default: $HOME/WAC_Quoto-Simulator
+#   DEPLOY_WEB_PORT  default: 34344
+#
+# Never put server passwords into the repo or into AI chat tools.
+
+name: Deploy devops
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-devops
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          passphrase: ${{ secrets.DEPLOY_SSH_KEY_PASSPHRASE }}
+          password: ${{ secrets.DEPLOY_PASSWORD }}
+          port: ${{ secrets.DEPLOY_SSH_PORT }}
+          script_stop: true
+          command_timeout: 25m
+          script: |
+            set -euo pipefail
+            export PORT="${{ secrets.DEPLOY_WEB_PORT }}"
+            if [ -z "${PORT}" ] || [ "${PORT}" = "" ]; then
+              export PORT=34344
+            fi
+            export APP_DIR="${{ secrets.DEPLOY_APP_DIR }}"
+            if [ -z "${APP_DIR}" ] || [ "${APP_DIR}" = "" ]; then
+              export APP_DIR="$HOME/WAC_Quoto-Simulator"
+            fi
+            export REPO="https://github.com/hyunseook0606-dev/WAC_Quoto-Simulator.git"
+            # nvm may be needed for node on the host
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+            if [ ! -d "$APP_DIR/.git" ]; then
+              git clone "$REPO" "$APP_DIR"
+            fi
+            cd "$APP_DIR"
+            bash scripts/deploy-cloud.sh
+            curl -sf "http://127.0.0.1:${PORT}/api/health" || true
+            echo "Deploy finished. Open: http://devops.wactracking.com:${PORT}/origin-cost-desk"

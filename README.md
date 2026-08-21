@@ -80,23 +80,36 @@ v1 history is last-write-wins, no auth (internal network / tunnel only).
 
 ## Deploy on company devops host
 
-Helper: `scripts/deploy-cloud.sh` (run **on the host** after SSH).
+### A) GitHub Actions (recommended — Teddy env on port 34344)
 
-It will:
+After secrets are set, every push to `main` (or **Actions → Deploy devops → Run workflow**) SSHs to the host and runs `scripts/deploy-cloud.sh` with `PORT=34344`.
 
-1. `git fetch` + `reset --hard origin/main`
-2. `npm ci` → `build` → `verify:cases`
-3. Stop old `serve` / previous `deskServer`
-4. Start `node server/deskServer.mjs` under a simple restart loop
+Public URL when the web port is open:
+
+http://devops.wactracking.com:34344/origin-cost-desk
+
+**One-time setup (GitHub → Settings → Secrets and variables → Actions):**
+
+| Secret | Example |
+|--------|---------|
+| `DEPLOY_HOST` | `devops.wactracking.com` |
+| `DEPLOY_SSH_PORT` | SSH port from Teddy (this is **not** `34344`) |
+| `DEPLOY_USER` | your SSH username |
+| `DEPLOY_SSH_KEY` | private key contents (preferred) |
+
+Optional: `DEPLOY_PASSWORD` (if no key), `DEPLOY_WEB_PORT` (default `34344`), `DEPLOY_APP_DIR`.
+
+Do **not** commit passwords or private keys. Do **not** paste server passwords into AI tools.
+
+### B) Manual SSH on the host
 
 ```bash
-bash scripts/deploy-cloud.sh
-# or: PORT=8080 bash scripts/deploy-cloud.sh
+PORT=34344 bash scripts/deploy-cloud.sh
+# older tunnel port:
+# PORT=8080 bash scripts/deploy-cloud.sh
 ```
 
-If the public port is firewalled, open an SSH local tunnel from your PC, then use `http://localhost:8080/origin-cost-desk`.
-
-Do **not** commit SSH passwords, keys, or host accounts into this repo.
+The script: `git fetch` + `reset --hard origin/main` → `npm ci` → `build` → `verify:cases` → restart `deskServer` on that port only.
 
 ## Layout
 
