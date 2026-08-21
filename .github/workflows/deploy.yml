@@ -51,6 +51,19 @@ jobs:
             fi
             cd "$APP_DIR"
             bash scripts/deploy-cloud.sh
+            echo "==> verify local"
             curl -sf "http://127.0.0.1:${PORT}/api/health"
             echo
-            echo "OK — open http://devops.wactracking.com:${PORT}/origin-cost-desk"
+            HTML="$(curl -sf "http://127.0.0.1:${PORT}/" | head -c 800 || true)"
+            echo "$HTML" | head -c 200
+            echo
+            if echo "$HTML" | grep -q '/src/main.tsx'; then
+              echo "ERROR: port ${PORT} is serving Vite DEV index (/src/main.tsx), not dist/"
+              exit 1
+            fi
+            if ! echo "$HTML" | grep -q '/assets/'; then
+              echo "ERROR: port ${PORT} response has no /assets/ bundle — production build not served"
+              exit 1
+            fi
+            echo "OK — open http://devops.wactracking.com:${PORT}/"
+            echo "    or http://devops.wactracking.com:${PORT}/origin-cost-desk"
