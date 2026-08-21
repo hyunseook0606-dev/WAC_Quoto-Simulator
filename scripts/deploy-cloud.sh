@@ -99,11 +99,13 @@ build_and_serve() {
   npm run build
   npm run verify:cases
   mkdir -p "${APP_DIR}/data"
+  # So static frontends bound to the repo root do not serve /src/main.tsx
+  bash "${APP_DIR}/scripts/publish-dist-root.sh" "${APP_DIR}"
   stop_old_server
   start_desk_server
   echo "==> Serving UI + shared history API on 0.0.0.0:${WEB_PORT}"
-  echo "    Public (if open): http://devops.wactracking.com:${WEB_PORT}/origin-cost-desk"
-  echo "    On host:          http://127.0.0.1:${WEB_PORT}/origin-cost-desk"
+  echo "    Public (if open): http://devops.wactracking.com:${WEB_PORT}/"
+  echo "    On host:          http://127.0.0.1:${WEB_PORT}/"
   echo "    History:          http://127.0.0.1:${WEB_PORT}/api/history"
   echo "    Store:            ${APP_DIR}/data/shared-history.json"
   echo "    Master rates remain per-browser (localStorage)."

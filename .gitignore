@@ -16,6 +16,9 @@ dist-ssr
 !.env.example
 .vercel
 data/
+# Published production assets on devops hosts (from scripts/publish-dist-root.sh)
+/assets/
+/404.html
 
 # Editor directories and files
 .vscode/*
