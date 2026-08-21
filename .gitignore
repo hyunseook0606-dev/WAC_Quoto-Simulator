@@ -20,6 +20,9 @@ data/
 /assets/
 /404.html
 
+# Local IDE / Cursor Cloud (not part of the product)
+.cursor/
+
 # Credentials / keys (never commit)
 *.pem
 *.p12

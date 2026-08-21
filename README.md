@@ -1,155 +1,143 @@
 # WAC Origin Cost Desk
 
-Internal air **가견적** tool for WAC forwarding. It mirrors the Excel workbook flow:
+Internal **air origin-cost quotation (가견적)** desk for WAC forwarding.
 
-`Master_DB` → `입력` → `견적서` (PDF)
+It mirrors the Excel workbook flow:
 
-Only route in the app: `/origin-cost-desk`.
+**Master_DB → Input → Quotation (PDF)**
 
-Repo: [hyunseook0606-dev/WAC_Quoto-Simulator](https://github.com/hyunseook0606-dev/WAC_Quoto-Simulator)
+| | |
+|--|--|
+| **App URL path** | `/` or `/origin-cost-desk` |
+| **Stack** | React 19 + Vite + TypeScript |
+| **Production server** | `server/deskServer.mjs` (static `dist/` + history API) |
+| **Repo** | [hyunseook0606-dev/WAC_Quoto-Simulator](https://github.com/hyunseook0606-dev/WAC_Quoto-Simulator) |
 
-## What this is
+This is an internship MVP. Quote math must stay aligned with the bundled Excel rates file.
 
-- React + Vite desk UI that loads rates from `public/excel/WAC_Air_Quotation_Simulator.xlsx` (first visit), then keeps Master edits in **browser localStorage**.
-- Quote math lives in TypeScript (`cmDeskQuote.ts`) and must stay aligned with Excel.
-- Production process (`npm start`) serves the built UI **and** a small JSON history API so the team shares Save PDF / Pin history on one server file.
+---
 
-## Requirements
-
-- Node **22+** (nvm on the devops host is fine)
-- npm
-
-## Local development
+## Quick start (local)
 
 ```bash
 npm ci
-npm run dev          # http://localhost:5174/origin-cost-desk
-```
-
-### Shared history while developing
-
-History API runs separately; Vite proxies `/api` → `127.0.0.1:8080`.
-
-```bash
-# terminal 1
-npm run dev:api
-
-# terminal 2
 npm run dev
 ```
 
-If `dev:api` is down, the UI uses browser-only history and shows that in the history panel.
+Open: http://localhost:5174/origin-cost-desk
 
-### Checks
+**Optional — shared history while developing** (two terminals):
+
+```bash
+npm run dev:api   # history API on :8080
+npm run dev       # Vite proxies /api → :8080
+```
+
+Without `dev:api`, history falls back to this browser only (`localStorage`).
 
 ```bash
 npx tsc -b
-npm run verify:cases   # ICN-HKG / HKG-ICN regression cases A–F
+npm run verify:cases
 npm run build
 ```
 
-## Production (UI + shared history)
+Node **22+** recommended.
+
+---
+
+## What is shared vs per-browser
+
+| Data | Storage |
+|------|---------|
+| Quote history (Save PDF, Pin, delete) | Server `data/shared-history.json` when `/api/history` is available; otherwise browser `localStorage` |
+| Master rates & input draft | Browser `localStorage` only |
+| Bundled Excel | First-load default only (`public/excel/…`) |
+
+For **team-shared history**, the site must be served by `deskServer` (so `/api/health` and `/api/history` respond). A static file host with UI only will not share history across PCs.
+
+---
+
+## Production
 
 ```bash
 npm ci
 npm run build
-npm start              # node server/deskServer.mjs  (PORT default 8080)
+npm start          # PORT=8080 by default
+# PORT=34344 npm start
 ```
 
-| Path | Purpose |
-|------|---------|
-| `/origin-cost-desk` | Desk UI (SPA; unknown paths → `index.html`) |
+| Endpoint | Purpose |
+|----------|---------|
+| `/`, `/origin-cost-desk` | Desk UI |
 | `GET /api/health` | Liveness |
-| `GET /api/history` | `{ updatedAt, items }` |
-| `POST /api/history` | Upsert one history item by `id` |
-| `DELETE /api/history/:id` | Remove one item |
+| `GET/POST /api/history` | List / upsert history |
+| `DELETE /api/history/:id` | Delete one item |
 
-Store file (created at runtime, **not** in git):
+---
 
-`data/shared-history.json`
+## Deploy (company devops)
 
-### What is shared vs local
+1. Prefer **GitHub Actions** (workflow: `.github/workflows/deploy.yml`).
+2. Put SSH settings only in **GitHub Actions secrets** (never in source):
+   - `DEPLOY_HOST`, `DEPLOY_SSH_PORT`, `DEPLOY_USER`
+   - `DEPLOY_SSH_KEY` (preferred) or `DEPLOY_PASSWORD`
+3. On the host, the deploy script builds, publishes `dist/` for static frontends, and starts `deskServer` on port **34344**.
 
-| Data | Where |
-|------|--------|
-| Quote history (Save PDF, Pin, delete) | Server file when API is up; else localStorage fallback |
-| Master rates / draft input | Per browser (`localStorage`) |
-| Bundled Excel | First-load default only |
-
-v1 history is last-write-wins, no auth (internal network / tunnel only).
-
-## Deploy on company devops host
-
-### A) GitHub Actions (recommended — Teddy env on port 34344)
-
-After secrets are set, every push to `main` (or **Actions → Deploy devops → Run workflow**) SSHs to the host and runs `scripts/deploy-cloud.sh` with `PORT=34344`.
-
-Public URL when the web port is open:
-
-http://devops.wactracking.com:34344/origin-cost-desk
-
-**One-time setup (GitHub → Settings → Secrets and variables → Actions):**
-
-| Secret | Example |
-|--------|---------|
-| `DEPLOY_HOST` | `devops.wactracking.com` |
-| `DEPLOY_SSH_PORT` | SSH port from Teddy (this is **not** `34344`) |
-| `DEPLOY_USER` | your SSH username |
-| `DEPLOY_SSH_KEY` | private key contents (preferred) |
-
-Optional: `DEPLOY_PASSWORD` (if no key), `DEPLOY_WEB_PORT` (default `34344`), `DEPLOY_APP_DIR`.
-
-Do **not** commit passwords or private keys. See **[SECURITY.md](./SECURITY.md)**:
-
-1. Do not let AI agents SSH into the company server.
-2. Do not paste server passwords into AI tools.
-3. Do not store credentials in the GitHub repo (use Actions secrets only).
-
-### B) Manual SSH on the host
+Manual on the host:
 
 ```bash
 PORT=34344 bash scripts/deploy-cloud.sh
-# older tunnel port:
-# PORT=8080 bash scripts/deploy-cloud.sh
 ```
 
-The script: `git fetch` + `reset --hard origin/main` → `npm ci` → `build` → `verify:cases` → restart `deskServer` on that port only.
+Security rules for this environment: **[SECURITY.md](./SECURITY.md)**.
 
-## Layout
+---
+
+## Repository layout
 
 ```
-src/origin-cost-desk/     UI, quote engine, PDF HTML, history client
-server/deskServer.mjs     Static dist/ + /api/history
-public/excel/…xlsx        Master rates source for the web app
-scripts/verify-icn-hkg-cases.mts
-scripts/deploy-cloud.sh
-excel-quote/              Optional Python engine (not used by the web UI)
-data/                     Runtime shared history (gitignored)
+src/origin-cost-desk/     Desk UI, quote engine, PDF HTML, history client
+server/deskServer.mjs     Production static + /api/history
+public/excel/             Master rates workbook (web default)
+scripts/
+  verify-icn-hkg-cases.mts   Quote regression (A–F)
+  deploy-cloud.sh            Host deploy (git pull → build → deskServer)
+  publish-dist-root.sh       Copy dist/ into web root (static hosts)
+  run-prod-port.sh           One-shot prod restart helper
+excel-quote/              Optional Python engine (not used by the web app)
+.github/workflows/        CI deploy (secrets only — no passwords in git)
 ```
 
-## Calculation rules (must match Excel)
+---
 
-- CBM = L × W × H × Qty / 1,000,000
-- Volume kg = CBM × 167
-- Per-piece C.W. = max(GW, CBM×167); multi-piece C.W. = sum of per-piece (Excel M14)
-- Break: highest Master weight-break whose min kg ≤ C.W.
-- Air freight = max(rate × C.W., MIN); FSC/SSC = per kg × C.W.
-- ALL-IN /kg (display) = Air rate + FSC/kg + SSC/kg (not part of TOTAL)
-- Local: CBM / KG|C.W. / BL|ENTRY / PLT / else max(rate, min); Terminal basis can follow Master Note (C.W. vs G.W.)
-- Currency from Master `CUR`. **HKD** → TOTAL × Ex.Rate. **USD** → Ex.Rate ignored.
+## Quote rules (must match Excel)
+
+- CBM = L × W × H × Qty / 1,000,000  
+- Volume kg = CBM × 167  
+- Per-piece C.W. = max(GW, CBM×167); multi-piece = sum (Excel M14)  
+- Break = highest Master weight-break with min kg ≤ C.W.  
+- Air = max(rate × C.W., MIN); FSC/SSC = per kg × C.W.  
+- ALL-IN /kg (display only) = Air rate + FSC/kg + SSC/kg  
+- **HKD** TOTAL × Ex.Rate; **USD** ignores Ex.Rate  
+
+After changing quote or Master parsing: `npm run verify:cases`.
+
+---
 
 ## npm scripts
 
-| Script | Role |
-|--------|------|
-| `dev` | Vite on 5174 |
-| `dev:api` | History API (+ serves `dist/` if built) |
-| `build` | `tsc -b` + Vite production build |
-| `start` | Production desk server |
-| `verify:cases` | Quote regression |
+| Script | Purpose |
+|--------|---------|
+| `dev` | Vite (:5174) |
+| `dev:api` | Local history API (:8080) |
+| `build` | Typecheck + production bundle |
+| `start` | `deskServer` |
+| `verify:cases` | Regression cases |
 
-## Notes for maintainers
+---
 
-- Changing quote math or Master parsing: run `npm run verify:cases` before merge.
-- Shared history JSON can grow (PDF HTML is stored per item); server body limit is 8MB per request.
-- Marketing / pitch assets were removed on purpose; keep only WAC logos + the Excel under `public/`.
+## Notes
+
+- No marketing site in this repo — desk only.  
+- Do not commit `.env`, private keys, or Excel lock files (`~$*`).  
+- Optional Cursor Cloud files are **not** part of the product runtime; see `SECURITY.md` before any server access.

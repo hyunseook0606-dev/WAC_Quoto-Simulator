@@ -1,38 +1,8 @@
-# WAC Origin Cost Desk
+# Agent notes (optional)
 
-Internal air quotation desk. App routes everything to `/origin-cost-desk`.
+Not required to run or deploy the desk. Product docs: **README.md**. Security: **SECURITY.md**.
 
-## Local
-
-```bash
-npm ci
-npm run dev
-```
-
-Port **5174**. Open `/origin-cost-desk`.
-
-Shared history (optional while developing):
-
-```bash
-npm run dev:api   # :8080
-npm run dev       # proxies /api
-```
-
-## Layout
-
-- `src/origin-cost-desk/` — UI, quote engine, PDF HTML, `historyApi.ts`
-- `server/deskServer.mjs` — production static + `/api/history` → `data/shared-history.json`
-- `public/excel/WAC_Air_Quotation_Simulator.xlsx` — Master rates source
-- HKD lanes: TOTAL × Ex.Rate. USD lanes leave TOTAL as-is.
-- Pin repeat cases in Input; Save PDF auto-saves history (server when API up).
-- Master routes and weight breaks are editable; saved per browser (`origin-cost-desk.master.v2`). Bundled workbook is first-load default only.
-
-## Cursor Cloud specific instructions
-
-- `.cursor/environment.json` runs `npm ci`.
-- Preview: `npm run dev -- --host 0.0.0.0 --port 5174`
-- Typecheck: `npx tsc -b`
-- Verify: `npm run verify:cases`
-- Do not commit `.env` or Excel lock files (`~$*`).
-- Logos: `public/wac-logo.png`, `public/wac-mark-hero.png`.
-- **Security (company devops):** Never SSH into devops from the agent. Never ask for or use server passwords in chat. Never commit credentials. See `SECURITY.md`. Deploy only via GitHub Actions secrets or the human's own terminal.
+- Local: `npm ci` → `npm run dev` → http://localhost:5174/origin-cost-desk  
+- Checks: `npx tsc -b`, `npm run verify:cases`  
+- **Never** SSH to company devops from an agent. **Never** use or request server passwords in chat.  
+- Do not commit `.env`, keys, or Excel lock files (`~$*`).
